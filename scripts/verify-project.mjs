@@ -69,7 +69,15 @@ async function verifyIslandCollision(browser) {
   await page.getByRole("button", { name: /US NAVY/ }).click();
   await page.getByText("BATTLESHIP", { exact: true }).waitFor();
   const result = await page.evaluate(() => window.__verifyIslandCollision?.());
-  if (!result || !result.playerStopped || !result.angledClear || !result.enemyClear || !result.playerHullClearance) {
+  if (
+    !result ||
+    !result.playerStopped ||
+    !result.angledClear ||
+    !result.enemyClear ||
+    !result.playerHullClearance ||
+    result.germanRenderLength !== 105 ||
+    result.germanCollisionClearance <= result.germanRenderLength
+  ) {
     throw new Error(`Island collision failed: ${JSON.stringify(result)}`);
   }
   await page.close();

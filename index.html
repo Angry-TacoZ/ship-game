@@ -540,12 +540,13 @@ function outerIslandShorelineRadius(isl, angle) {
 }
 
 function getHullDimensions(radius, nation) {
-    return { length: radius * 2.1 * (nation === 'Germany' ? 1.2 : 1), width: radius * 0.75 };
+    return { length: radius * 2.1, width: radius * 0.75 };
 }
 
 function shipIslandClearance(entity) {
     const hull = getHullDimensions(entity.radius, entity.nation);
-    return Math.hypot(hull.length, hull.width);
+    const forwardExtent = hull.length * (entity.nation === 'Germany' ? 1.2 : 1);
+    return Math.hypot(forwardExtent, hull.width);
 }
 
 function resolveIslandCollision(entity) {
@@ -942,11 +943,14 @@ function startGame() {
             resolveIslandCollision(enemy);
             const enemyClear = Math.hypot(enemy.x, enemy.y) >= outerIslandShorelineRadius(island, Math.atan2(enemy.y, enemy.x)) + shipIslandClearance(enemy);
             islands = originalIslands;
+            const germanDimensions = getHullDimensions(50, 'Germany');
             return {
                 playerStopped,
                 angledClear,
                 enemyClear,
                 playerHullClearance: playerClearance > testPlayer.radius,
+                germanRenderLength: germanDimensions.length,
+                germanCollisionClearance: shipIslandClearance({ radius: 50, nation: 'Germany' }),
                 playerX: testPlayer.x,
                 enemyX: enemy.x
             };
