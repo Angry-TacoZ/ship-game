@@ -539,13 +539,22 @@ function outerIslandShorelineRadius(isl, angle) {
     return islandLayerRadius(isl, angle, ISLAND_LAYERS[0]);
 }
 
+function getHullDimensions(radius, nation) {
+    return { length: radius * 2.1 * (nation === 'Germany' ? 1.2 : 1), width: radius * 0.75 };
+}
+
+function shipIslandClearance(entity) {
+    const hull = getHullDimensions(entity.radius, entity.nation);
+    return Math.hypot(hull.length, hull.width);
+}
+
 function resolveIslandCollision(entity) {
     for (const island of islands) {
         const dx = entity.x - island.x;
         const dy = entity.y - island.y;
         const distance = Math.hypot(dx, dy);
         const angle = Math.atan2(dy, dx);
-        const minDistance = outerIslandShorelineRadius(island, angle) + entity.radius;
+        const minDistance = outerIslandShorelineRadius(island, angle) + shipIslandClearance(entity);
         if (distance >= minDistance) continue;
 
         const nx = distance > 0.001 ? dx / distance : 1;
@@ -570,7 +579,7 @@ function resolveIslandCollision(entity) {
  * ==========================================
  */
 function drawDetailedHull(context, nation, radius, hullColor, isPlayer = false) {
-    const len = radius * 2.1, w = radius * 0.75;
+    const { length: len, width: w } = getHullDimensions(radius, nation);
     context.save();
     context.fillStyle = hullColor; context.strokeStyle = '#000'; context.lineWidth = isPlayer ? 2.5 : 1.5;
     context.beginPath();
@@ -917,22 +926,30 @@ function startGame() {
             const testPlayer = new Player('USA');
             testPlayer.x = 140; testPlayer.y = 0; testPlayer.vx = -10; testPlayer.vy = 0;
             resolveIslandCollision(testPlayer);
-            const playerStopped = testPlayer.vx >= 0 && testPlayer.x >= outerIslandShorelineRadius(island, 0) + testPlayer.radius;
+            const playerClearance = shipIslandClearance(testPlayer);
+            const playerStopped = testPlayer.vx >= 0 && testPlayer.x >= outerIslandShorelineRadius(island, 0) + playerClearance;
 
             const angledPlayer = new Player('USA');
             angledPlayer.x = 100; angledPlayer.y = 100; angledPlayer.vx = -5; angledPlayer.vy = -5;
             resolveIslandCollision(angledPlayer);
             const angledDistance = Math.hypot(angledPlayer.x, angledPlayer.y);
-            const angledClear = angledDistance >= outerIslandShorelineRadius(island, Math.atan2(angledPlayer.y, angledPlayer.x)) + angledPlayer.radius;
+            const angledClear = angledDistance >= outerIslandShorelineRadius(island, Math.atan2(angledPlayer.y, angledPlayer.x)) + shipIslandClearance(angledPlayer);
 
             const enemy = new Enemy('DESTROYER', 'Japan');
             enemy.x = 140; enemy.y = 0; enemy.angle = Math.PI;
             enemy.x += Math.cos(enemy.angle) * enemy.spec.speed;
             enemy.y += Math.sin(enemy.angle) * enemy.spec.speed;
             resolveIslandCollision(enemy);
-            const enemyClear = Math.hypot(enemy.x, enemy.y) >= outerIslandShorelineRadius(island, Math.atan2(enemy.y, enemy.x)) + enemy.radius;
+            const enemyClear = Math.hypot(enemy.x, enemy.y) >= outerIslandShorelineRadius(island, Math.atan2(enemy.y, enemy.x)) + shipIslandClearance(enemy);
             islands = originalIslands;
-            return { playerStopped, angledClear, enemyClear, playerX: testPlayer.x, enemyX: enemy.x };
+            return {
+                playerStopped,
+                angledClear,
+                enemyClear,
+                playerHullClearance: playerClearance > testPlayer.radius,
+                playerX: testPlayer.x,
+                enemyX: enemy.x
+            };
         };
     }
     document.getElementById('background-layer').classList.add('hidden'); document.getElementById('menu-overlay').classList.add('hidden');

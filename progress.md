@@ -15,7 +15,7 @@ Original prompt: Recover the playable browser naval game and continue its develo
 
 ## Island collision fix
 
-- Added shared island-boundary resolution for player and enemy ships.
-- Ships are pushed outside the island radius and inward velocity is removed so they can slide along the shoreline.
+- Added shared collision resolution against the procedural outer shoreline, with clearance based on the rendered hull footprint.
+- Player ships remove inward velocity when they collide, preserving shoreline sliding; enemies use position constraints because their movement remains direct position stepping.
 - Added `?verify-island-collision` browser verification coverage.
 - `npm run verify` passes on the island-collision branch.
