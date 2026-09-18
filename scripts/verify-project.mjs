@@ -83,6 +83,21 @@ async function verifyIslandCollision(browser) {
   await page.close();
 }
 
+async function verifyEnemyOrbit(browser) {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  page.on("pageerror", (error) => { throw error; });
+  await page.goto(`${baseUrl}/?verify-enemy-orbit`, { waitUntil: "networkidle" });
+  await page.getByText("Click to Engage", { exact: true }).click();
+  await page.getByRole("button", { name: "Skirmish", exact: true }).click();
+  await page.getByRole("button", { name: /US NAVY/ }).click();
+  await page.getByText("BATTLESHIP", { exact: true }).waitFor();
+  const result = await page.evaluate(() => window.__verifyEnemyOrbit?.());
+  if (!result?.moved || !result?.approachedCombatRange || !result?.staysNearCombatRange || !result?.shiftedOrbit) {
+    throw new Error(`Enemy orbit verification failed: ${JSON.stringify(result)}`);
+  }
+  await page.close();
+}
+
 async function verifyAnimationLoop(browser) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
   page.on("pageerror", (error) => { throw error; });
@@ -158,6 +173,7 @@ try {
     await verifyDesktop(browser);
     await verifyDefeat(browser);
     await verifyIslandCollision(browser);
+    await verifyEnemyOrbit(browser);
     await verifyAnimationLoop(browser);
     await verifyWaveProgression(browser);
     await verifyTouch(browser);

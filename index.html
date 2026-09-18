@@ -753,15 +753,37 @@ class Enemy {
         this.radius = this.spec.radius; this.timer = Math.random()*2000;
         const a = Math.random()*Math.PI*2; this.x = player.x + Math.cos(a)*4500; this.y = player.y + Math.sin(a)*4500;
         this.angle = Math.atan2(player.y - this.y, player.x - this.x); this.turretAngle = this.angle;
+        this.orbitDirection = Math.random() < 0.5 ? -1 : 1;
+        this.orbitRadius = 700 + (Math.random() - 0.5) * 120;
+        this.orbitShiftTimer = 2600 + Math.random() * 2200;
+        this.orbitShiftCount = 0;
     }
     update(dt) {
         const ts = dt/16.6; let dist = Math.hypot(player.x-this.x, player.y-this.y);
         let targetAngle = Math.atan2(player.y - this.y, player.x - this.x);
-        let df = targetAngle - this.angle; while(df < -Math.PI) df += Math.PI*2; while(df > Math.PI) df -= Math.PI*2;
-        this.angle += Math.sign(df) * Math.min(Math.abs(df), 0.012 * ts);
         let tdf = targetAngle - this.turretAngle; while(tdf < -Math.PI) tdf += Math.PI*2; while(tdf > Math.PI) tdf -= Math.PI*2;
         this.turretAngle += Math.sign(tdf) * Math.min(Math.abs(tdf), 0.02 * ts);
-        if (dist > 700) { this.x += Math.cos(this.angle)*this.spec.speed*ts; this.y += Math.sin(this.angle)*this.spec.speed*ts; }
+        this.orbitShiftTimer -= dt;
+        if (this.orbitShiftTimer <= 0) {
+            this.orbitDirection *= -1;
+            this.orbitRadius = 700 + (Math.random() - 0.5) * 180;
+            this.orbitShiftTimer = 2600 + Math.random() * 2200;
+            this.orbitShiftCount++;
+        }
+        const radial = dist - this.orbitRadius;
+        const radialStrength = Math.max(-1, Math.min(1, radial / 260));
+        const inwardX = (player.x - this.x) / Math.max(dist, 1);
+        const inwardY = (player.y - this.y) / Math.max(dist, 1);
+        const tangentX = -inwardY * this.orbitDirection;
+        const tangentY = inwardX * this.orbitDirection;
+        const moveX = inwardX * radialStrength + tangentX * 0.92;
+        const moveY = inwardY * radialStrength + tangentY * 0.92;
+        const moveLength = Math.hypot(moveX, moveY) || 1;
+        const velocityAngle = Math.atan2(moveY, moveX);
+        let df = velocityAngle - this.angle; while(df < -Math.PI) df += Math.PI*2; while(df > Math.PI) df -= Math.PI*2;
+        this.angle += Math.sign(df) * Math.min(Math.abs(df), 0.012 * ts);
+        this.x += moveX / moveLength * this.spec.speed * ts;
+        this.y += moveY / moveLength * this.spec.speed * ts;
         resolveIslandCollision(this);
 
         // Enemy Wake Enhancement
@@ -988,6 +1010,26 @@ function startGame() {
                 germanCollisionClearance: shipIslandClearance({ radius: 50, nation: 'Germany' }),
                 playerX: testPlayer.x,
                 enemyX: enemy.x
+            };
+        };
+    }
+    if (new URLSearchParams(window.location.search).has('verify-enemy-orbit')) {
+        window.__verifyEnemyOrbit = () => {
+            const testEnemy = new Enemy('DESTROYER', 'Japan');
+            testEnemy.x = player.x + 1200; testEnemy.y = player.y; testEnemy.orbitRadius = 700;
+            testEnemy.orbitDirection = 1; testEnemy.orbitShiftTimer = 100;
+            const startDistance = Math.hypot(player.x - testEnemy.x, player.y - testEnemy.y);
+            testEnemy.update(1000);
+            const firstDistance = Math.hypot(player.x - testEnemy.x, player.y - testEnemy.y);
+            const firstPosition = { x: testEnemy.x, y: testEnemy.y };
+            testEnemy.update(1000);
+            const secondDistance = Math.hypot(player.x - testEnemy.x, player.y - testEnemy.y);
+            return {
+                moved: Math.hypot(testEnemy.x - firstPosition.x, testEnemy.y - firstPosition.y) > 0,
+                approachedCombatRange: firstDistance < startDistance,
+                staysNearCombatRange: Math.abs(secondDistance - testEnemy.orbitRadius) < 260,
+                shiftedOrbit: testEnemy.orbitShiftCount === 1,
+                orbitDirection: testEnemy.orbitDirection
             };
         };
     }
