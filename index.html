@@ -524,6 +524,32 @@ function updateVolume(type, val) {
     }
 }
 
+// Islands use a circular gameplay boundary that is slightly larger than the
+// visual shoreline, keeping ships out of the land even where the procedural
+// shoreline is irregular.
+function resolveIslandCollision(entity) {
+    for (const island of islands) {
+        const minDistance = island.radius + entity.radius;
+        const dx = entity.x - island.x;
+        const dy = entity.y - island.y;
+        const distance = Math.hypot(dx, dy);
+        if (distance >= minDistance) continue;
+
+        const nx = distance > 0.001 ? dx / distance : 1;
+        const ny = distance > 0.001 ? dy / distance : 0;
+        entity.x = island.x + nx * minDistance;
+        entity.y = island.y + ny * minDistance;
+
+        // Remove only velocity directed into the island; ships can still
+        // slide along the shoreline instead of getting stuck in place.
+        const inwardVelocity = entity.vx * nx + entity.vy * ny;
+        if (inwardVelocity < 0) {
+            entity.vx -= inwardVelocity * nx;
+            entity.vy -= inwardVelocity * ny;
+        }
+    }
+}
+
 /** * ==========================================
  * GRAPHICS PIPELINE
  * ==========================================
@@ -615,6 +641,7 @@ class Player {
         if (keys['KeyS'] || keys['ArrowDown']) { thrust = -0.4; this.waypoint = null; }
         if (thrust !== 0) { const f = this.config.hull.accel * this.speedMult * thrust * ts; this.vx += Math.cos(this.angle) * f; this.vy += Math.sin(this.angle) * f; }
         this.vx *= Math.pow(0.985, ts); this.vy *= Math.pow(0.985, ts); this.x += this.vx*ts; this.y += this.vy*ts;
+        resolveIslandCollision(this);
 
         // Advanced Wake Emission
         if (Math.hypot(this.vx, this.vy) > 0.25) {
@@ -694,6 +721,7 @@ class Enemy {
         let tdf = targetAngle - this.turretAngle; while(tdf < -Math.PI) tdf += Math.PI*2; while(tdf > Math.PI) tdf -= Math.PI*2;
         this.turretAngle += Math.sign(tdf) * Math.min(Math.abs(tdf), 0.02 * ts);
         if (dist > 700) { this.x += Math.cos(this.angle)*this.spec.speed*ts; this.y += Math.sin(this.angle)*this.spec.speed*ts; }
+        resolveIslandCollision(this);
 
         // Enemy Wake Enhancement
         if (dist > 100) {
@@ -866,6 +894,16 @@ function startGame() {
     gameState = 'PLAYING';
     if (new URLSearchParams(window.location.search).has('verify-defeat')) {
         window.__verifyDefeat = () => { if (player) { player.health = 0; handlePlayerDefeat(); } };
+    }
+    if (new URLSearchParams(window.location.search).has('verify-island-collision')) {
+        window.__verifyIslandCollision = () => {
+            const originalIslands = islands;
+            islands = [{ x: 0, y: 0, radius: 100 }];
+            const enemy = { x: 120, y: 0, radius: 35, vx: -10, vy: 0 };
+            resolveIslandCollision(enemy);
+            islands = originalIslands;
+            return { x: enemy.x, y: enemy.y, vx: enemy.vx, vy: enemy.vy };
+        };
     }
     document.getElementById('background-layer').classList.add('hidden'); document.getElementById('menu-overlay').classList.add('hidden');
     document.getElementById('hud-overlay').classList.remove('hidden'); document.getElementById('minimap-container').classList.remove('hidden');

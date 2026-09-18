@@ -12,3 +12,10 @@ Original prompt: Recover the playable browser naval game and continue its develo
 - Choose a final title and centralize it in a configuration value before applying it to visible UI and metadata.
 - Add deterministic simulation hooks before writing deeper gameplay-regression tests.
 - Fix the documented duplicate-animation-loop issue in a focused change.
+
+## Island collision fix
+
+- Added shared island-boundary resolution for player and enemy ships.
+- Ships are pushed outside the island radius and inward velocity is removed so they can slide along the shoreline.
+- Added `?verify-island-collision` browser verification coverage.
+- `npm run verify` passes on the island-collision branch.
