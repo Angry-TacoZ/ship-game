@@ -5,7 +5,7 @@ description: Create, validate, and report a focused pull request for meaningful 
 
 # Pull Request Workflow
 
-1. For larger feature work, meaningful refactors, public-facing changes, security-relevant changes, data-model changes, Firebase/function changes, or portfolio-relevant work, create a focused `codex/<short-change-name>` branch.
+1. For every application, gameplay, user-facing, configuration, dependency, security, deployment, or portfolio change, create a focused `codex/<short-change-name>` branch and pull request. Direct target-branch commits are allowed only for explanation-only or documentation-only work that cannot affect runtime behavior and only when James explicitly states within Codex that the pull-request workflow should be bypassed.
 2. Keep unrelated local changes out of the pull request and stage files explicitly.
 3. Run relevant project verification before opening the pull request.
 4. Run applicable secret and API-exposure scans for browser-delivered or public deployment work.

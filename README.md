@@ -63,6 +63,8 @@ The next engineering step should be a focused gameplay-baseline test and a separ
 
 This repository uses GitAgent: start with `AGENTS.md`, then `SOUL.md`, `RULES.md`, and applicable files in `workflows/` and `skills/`.
 
+Application, gameplay, configuration, dependency, security, deployment, and portfolio changes require a focused `codex/*` branch and pull request. The only local bypass is explanation-only or documentation-only work that cannot affect runtime behavior, and James must explicitly authorize that bypass within Codex.
+
 The guidance was copied from [Test Subject 01](https://github.com/Angry-TacoZ/test-subject-01), commit `af07945` on `codex/gitagent-verifier`. All rules, 13 procedural workflows, four reusable skills, and the PR template are preserved. Adaptations are limited to this recovered single-file game's identity and verification/CI instructions. GitAgent runtime files and generated verification artifacts are ignored.
 
 Test Subject 01's Phaser/Vite application and application-specific verifier scripts were not copied. The project started without a configured Git remote, canonical verifier, or hosted CI/deployment setup. Those are explicit setup gaps, not passing checks; the original verification and review requirements still apply.
