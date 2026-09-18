@@ -841,6 +841,12 @@ function drawMinimap() {
     mCtx.fillStyle='#38bdf8'; mCtx.beginPath(); mCtx.arc(center, center, 5, 0, Math.PI*2); mCtx.fill();
 }
 
+function handleWaveCleared() {
+    gameState = 'WAVE_END';
+    if (wave >= 5) showSubMenu('victory-menu');
+    else setTimeout(showLevelUp, 2000);
+}
+
 /** * ==========================================
  * MASTER LOOP
  * ==========================================
@@ -863,9 +869,7 @@ function gameLoop(timestamp) {
                 particles = particles.filter(p => p.update(TIME_STEP));
                 for(let i=damagePopups.length-1; i>=0; i--) { damagePopups[i].y += damagePopups[i].vy; damagePopups[i].life -= TIME_STEP; if (damagePopups[i].life <= 0) damagePopups.splice(i,1); }
                 if (enemies.length === 0 && gameState === 'PLAYING') {
-                    gameState = 'WAVE_END';
-                    if (wave >= 5) setTimeout(() => showSubMenu('victory-menu'), 2000);
-                    else setTimeout(showLevelUp, 2000);
+                    handleWaveCleared();
                 }
                 accumulator -= TIME_STEP;
             }
@@ -923,6 +927,7 @@ function showLevelUp() {
 }
 
 function nextWave() {
+    if (wave >= 5) return;
     wave++;
     document.getElementById('menu-overlay').classList.add('hidden');
     document.getElementById('wave-display').innerText = `WAVE ${wave}`;
@@ -932,9 +937,12 @@ function nextWave() {
 
 function spawnWave(waveNumber) {
     enemies = [];
-    WAVE_ROSTERS[waveNumber].forEach(({ type, count }) => {
+    const roster = WAVE_ROSTERS[waveNumber];
+    if (!roster) return false;
+    roster.forEach(({ type, count }) => {
         for (let i = 0; i < count; i++) enemies.push(new Enemy(type, 'Japan'));
     });
+    return true;
 }
 
 function selectNation(n) { selectedNation = n; initIslands(); startGame(); }
@@ -988,6 +996,28 @@ function startGame() {
             startGame();
             startGame();
             return animationLoopStarts;
+        };
+    }
+    if (new URLSearchParams(window.location.search).has('verify-wave-progression')) {
+        window.__verifyWaveProgression = {
+            roster: (waveNumber) => {
+                const originalWave = wave;
+                const spawned = spawnWave(waveNumber);
+                const counts = enemies.reduce((result, enemy) => {
+                    result[enemy.ck] = (result[enemy.ck] || 0) + 1;
+                    return result;
+                }, {});
+                wave = originalWave;
+                spawnWave(originalWave);
+                return { spawned, counts };
+            },
+            completeFinalWave: () => {
+                wave = 5;
+                enemies = [];
+                gameState = 'PLAYING';
+                handleWaveCleared();
+            },
+            state: () => ({ wave, gameState, victoryVisible: !document.getElementById('victory-menu').classList.contains('hidden') })
         };
     }
     document.getElementById('background-layer').classList.add('hidden'); document.getElementById('menu-overlay').classList.add('hidden');
