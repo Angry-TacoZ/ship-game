@@ -83,6 +83,19 @@ async function verifyIslandCollision(browser) {
   await page.close();
 }
 
+async function verifyAnimationLoop(browser) {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  page.on("pageerror", (error) => { throw error; });
+  await page.goto(`${baseUrl}/?verify-animation-loop`, { waitUntil: "networkidle" });
+  await page.getByText("Click to Engage", { exact: true }).click();
+  await page.getByRole("button", { name: "Skirmish", exact: true }).click();
+  await page.getByRole("button", { name: /US NAVY/ }).click();
+  await page.getByText("BATTLESHIP", { exact: true }).waitFor();
+  const starts = await page.evaluate(() => window.__verifyAnimationLoop?.());
+  if (starts !== 1) throw new Error(`Expected one animation loop, got ${starts}`);
+  await page.close();
+}
+
 async function verifyTouch(browser) {
   const context = await browser.newContext({ ...devices["iPhone 13"] });
   const page = await context.newPage();
@@ -107,6 +120,7 @@ try {
     await verifyDesktop(browser);
     await verifyDefeat(browser);
     await verifyIslandCollision(browser);
+    await verifyAnimationLoop(browser);
     await verifyTouch(browser);
   } finally {
     await browser.close();
