@@ -342,6 +342,12 @@ const ENEMY_SPECS = {
     'DESTROYER': { radius: 35, health: 650, speed: 4.5, damage: 40, reload: 3800, range: 1800, turrets: 2, scrap: 100 }
 };
 
+function getEnemyOrbitRadius(spec) {
+    const preferredRadius = spec.range * 0.82;
+    const variation = spec.range * 0.06;
+    return Math.max(spec.range * 0.7, Math.min(spec.range * 0.9, preferredRadius + (Math.random() - 0.5) * variation * 2));
+}
+
 const WAVE_ROSTERS = {
     1: [{ type: 'PT_BOAT', count: 5 }],
     2: [{ type: 'PT_BOAT', count: 6 }, { type: 'DESTROYER', count: 2 }],
@@ -754,7 +760,7 @@ class Enemy {
         const a = Math.random()*Math.PI*2; this.x = player.x + Math.cos(a)*4500; this.y = player.y + Math.sin(a)*4500;
         this.angle = Math.atan2(player.y - this.y, player.x - this.x); this.turretAngle = this.angle;
         this.orbitDirection = Math.random() < 0.5 ? -1 : 1;
-        this.orbitRadius = 700 + (Math.random() - 0.5) * 120;
+        this.orbitRadius = getEnemyOrbitRadius(this.spec);
         this.orbitShiftTimer = 2600 + Math.random() * 2200;
         this.orbitShiftCount = 0;
     }
@@ -766,7 +772,7 @@ class Enemy {
         this.orbitShiftTimer -= dt;
         if (this.orbitShiftTimer <= 0) {
             this.orbitDirection *= -1;
-            this.orbitRadius = 700 + (Math.random() - 0.5) * 180;
+            this.orbitRadius = getEnemyOrbitRadius(this.spec);
             this.orbitShiftTimer = 2600 + Math.random() * 2200;
             this.orbitShiftCount++;
         }
@@ -1015,22 +1021,34 @@ function startGame() {
     }
     if (new URLSearchParams(window.location.search).has('verify-enemy-orbit')) {
         window.__verifyEnemyOrbit = () => {
-            const testEnemy = new Enemy('DESTROYER', 'Japan');
-            testEnemy.x = player.x + 1200; testEnemy.y = player.y; testEnemy.orbitRadius = 700;
-            testEnemy.orbitDirection = 1; testEnemy.orbitShiftTimer = 100;
-            const startDistance = Math.hypot(player.x - testEnemy.x, player.y - testEnemy.y);
-            testEnemy.update(1000);
-            const firstDistance = Math.hypot(player.x - testEnemy.x, player.y - testEnemy.y);
-            const firstPosition = { x: testEnemy.x, y: testEnemy.y };
-            testEnemy.update(1000);
-            const secondDistance = Math.hypot(player.x - testEnemy.x, player.y - testEnemy.y);
-            return {
-                moved: Math.hypot(testEnemy.x - firstPosition.x, testEnemy.y - firstPosition.y) > 0,
-                approachedCombatRange: firstDistance < startDistance,
-                staysNearCombatRange: Math.abs(secondDistance - testEnemy.orbitRadius) < 260,
-                shiftedOrbit: testEnemy.orbitShiftCount === 1,
-                orbitDirection: testEnemy.orbitDirection
+            const verifyUnit = (ck, startDistance) => {
+                const testEnemy = new Enemy(ck, 'Japan');
+                testEnemy.x = player.x + startDistance; testEnemy.y = player.y;
+                testEnemy.orbitRadius = getEnemyOrbitRadius(testEnemy.spec);
+                testEnemy.orbitDirection = 1; testEnemy.orbitShiftTimer = 100;
+                const start = { x: testEnemy.x, y: testEnemy.y };
+                const startDistanceFromPlayer = Math.hypot(player.x - testEnemy.x, player.y - testEnemy.y);
+                testEnemy.update(1000);
+                const firstDistance = Math.hypot(player.x - testEnemy.x, player.y - testEnemy.y);
+                const firstPosition = { x: testEnemy.x, y: testEnemy.y };
+                testEnemy.update(2000);
+                const secondDistance = Math.hypot(player.x - testEnemy.x, player.y - testEnemy.y);
+                testEnemy.x = player.x + testEnemy.orbitRadius;
+                testEnemy.y = player.y;
+                const firingDistance = Math.hypot(player.x - testEnemy.x, player.y - testEnemy.y);
+                return {
+                    moved: Math.hypot(testEnemy.x - firstPosition.x, testEnemy.y - firstPosition.y) > 0,
+                    approachedCombatRange: firstDistance < startDistanceFromPlayer,
+                    staysNearCombatRange: Math.abs(secondDistance - testEnemy.orbitRadius) < 260,
+                    shiftedOrbit: testEnemy.orbitShiftCount === 1,
+                    orbitInsideWeaponRange: testEnemy.orbitRadius < testEnemy.spec.range,
+                    canFireAtOrbit: firingDistance < testEnemy.spec.range,
+                    displacement: Math.hypot(testEnemy.x - start.x, testEnemy.y - start.y),
+                    orbitRadius: testEnemy.orbitRadius,
+                    weaponRange: testEnemy.spec.range
+                };
             };
+            return { destroyer: verifyUnit('DESTROYER', 2200), ptBoat: verifyUnit('PT_BOAT', 900) };
         };
     }
     if (new URLSearchParams(window.location.search).has('verify-animation-loop')) {
