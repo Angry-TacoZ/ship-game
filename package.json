@@ -1,0 +1,12 @@
+{
+  "name": "ship-game",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "verify": "node scripts/verify-project.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.63.0"
+  }
+}

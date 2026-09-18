@@ -1,0 +1,9 @@
+spec_version: "0.1.0"
+name: ship-game
+version: 0.1.0
+description: Engineering agent for James's browser naval game repository.
+skills:
+  - api-integration-security
+  - interaction-usability
+  - security-relevant-change
+  - visual-diagnosis

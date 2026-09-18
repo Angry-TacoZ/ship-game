@@ -1,6 +1,7 @@
 node_modules/
-output/
+dist/
 playwright-report/
 test-results/
 .codex-artifacts/
+output/
 .gitagent/
