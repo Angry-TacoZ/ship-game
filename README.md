@@ -52,7 +52,7 @@ Recovery checks: JavaScript syntax passed; source hash matched the live shared g
 Existing issues identified by reading the recovered source, left unchanged to preserve the baseline:
 
 - Every `startGame()` starts another animation loop; restarting a run can stack loops and alter speed.
-- No player-death transition is implemented when health reaches zero.
+- The player now enters a defeat state at zero hull, clears active projectiles, and can return to the command menu.
 - XP-triggered refits do not explicitly pause gameplay, and selecting any refit starts the next wave.
 - Islands are visual scenery; no island collision is implemented.
 - Array removal during `forEach` can skip updates; a friendly projectile can damage multiple overlapping enemies after its life reaches zero.
