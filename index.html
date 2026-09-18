@@ -524,12 +524,63 @@ function updateVolume(type, val) {
     }
 }
 
+const ISLAND_LAYERS = [
+    { r: 1.0, color: '#eab308', noise: 0.15 },
+    { r: 0.85, color: '#22c55e', noise: 0.1 },
+    { r: 0.65, color: '#15803d', noise: 0.08 }
+];
+
+function islandLayerRadius(isl, angle, layer) {
+    const noise = (Math.sin(5 * angle + isl.seed1) + Math.cos(7 * angle + isl.seed2)) * layer.noise;
+    return isl.radius * layer.r * (1 + noise);
+}
+
+function outerIslandShorelineRadius(isl, angle) {
+    return islandLayerRadius(isl, angle, ISLAND_LAYERS[0]);
+}
+
+function getHullDimensions(radius, nation) {
+    return { length: radius * 2.1, width: radius * 0.75 };
+}
+
+function shipIslandClearance(entity) {
+    const hull = getHullDimensions(entity.radius, entity.nation);
+    const forwardExtent = hull.length * (entity.nation === 'Germany' ? 1.2 : 1);
+    return Math.hypot(forwardExtent, hull.width);
+}
+
+function resolveIslandCollision(entity) {
+    for (const island of islands) {
+        const dx = entity.x - island.x;
+        const dy = entity.y - island.y;
+        const distance = Math.hypot(dx, dy);
+        const angle = Math.atan2(dy, dx);
+        const minDistance = outerIslandShorelineRadius(island, angle) + shipIslandClearance(entity);
+        if (distance >= minDistance) continue;
+
+        const nx = distance > 0.001 ? dx / distance : 1;
+        const ny = distance > 0.001 ? dy / distance : 0;
+        entity.x = island.x + nx * minDistance;
+        entity.y = island.y + ny * minDistance;
+
+        // Remove only velocity directed into the island; ships can still
+        // slide along the shoreline instead of getting stuck in place.
+        if (Number.isFinite(entity.vx) && Number.isFinite(entity.vy)) {
+            const inwardVelocity = entity.vx * nx + entity.vy * ny;
+            if (inwardVelocity < 0) {
+                entity.vx -= inwardVelocity * nx;
+                entity.vy -= inwardVelocity * ny;
+            }
+        }
+    }
+}
+
 /** * ==========================================
  * GRAPHICS PIPELINE
  * ==========================================
  */
 function drawDetailedHull(context, nation, radius, hullColor, isPlayer = false) {
-    const len = radius * 2.1, w = radius * 0.75;
+    const { length: len, width: w } = getHullDimensions(radius, nation);
     context.save();
     context.fillStyle = hullColor; context.strokeStyle = '#000'; context.lineWidth = isPlayer ? 2.5 : 1.5;
     context.beginPath();
@@ -615,6 +666,7 @@ class Player {
         if (keys['KeyS'] || keys['ArrowDown']) { thrust = -0.4; this.waypoint = null; }
         if (thrust !== 0) { const f = this.config.hull.accel * this.speedMult * thrust * ts; this.vx += Math.cos(this.angle) * f; this.vy += Math.sin(this.angle) * f; }
         this.vx *= Math.pow(0.985, ts); this.vy *= Math.pow(0.985, ts); this.x += this.vx*ts; this.y += this.vy*ts;
+        resolveIslandCollision(this);
 
         // Advanced Wake Emission
         if (Math.hypot(this.vx, this.vy) > 0.25) {
@@ -694,6 +746,7 @@ class Enemy {
         let tdf = targetAngle - this.turretAngle; while(tdf < -Math.PI) tdf += Math.PI*2; while(tdf > Math.PI) tdf -= Math.PI*2;
         this.turretAngle += Math.sign(tdf) * Math.min(Math.abs(tdf), 0.02 * ts);
         if (dist > 700) { this.x += Math.cos(this.angle)*this.spec.speed*ts; this.y += Math.sin(this.angle)*this.spec.speed*ts; }
+        resolveIslandCollision(this);
 
         // Enemy Wake Enhancement
         if (dist > 100) {
@@ -748,12 +801,10 @@ function initIslands() {
 }
 
 function renderIslandToBuffer(bCtx, isl, radius, center) {
-    const layers = [{ r: 1.0, color: '#eab308', noise: 0.15 }, { r: 0.85, color: '#22c55e', noise: 0.1 }, { r: 0.65, color: '#15803d', noise: 0.08 }];
-    layers.forEach(layer => {
+    ISLAND_LAYERS.forEach(layer => {
         bCtx.beginPath(); const lRadius = radius * layer.r;
         for (let a = 0; a <= Math.PI * 2 + 0.1; a += Math.PI / 64) {
-            const noise = (Math.sin(5*a + isl.seed1) + Math.cos(7*a + isl.seed2)) * layer.noise;
-            const r = lRadius * (1 + noise); const px = center + Math.cos(a)*r, py = center + Math.sin(a)*r;
+            const r = islandLayerRadius(isl, a, layer); const px = center + Math.cos(a)*r, py = center + Math.sin(a)*r;
             if (a === 0) bCtx.moveTo(px, py); else bCtx.lineTo(px, py);
         }
         bCtx.closePath(); bCtx.fillStyle = layer.color; bCtx.fill(); bCtx.strokeStyle = 'rgba(0,0,0,0.1)'; bCtx.lineWidth = 4; bCtx.stroke();
@@ -866,6 +917,44 @@ function startGame() {
     gameState = 'PLAYING';
     if (new URLSearchParams(window.location.search).has('verify-defeat')) {
         window.__verifyDefeat = () => { if (player) { player.health = 0; handlePlayerDefeat(); } };
+    }
+    if (new URLSearchParams(window.location.search).has('verify-island-collision')) {
+        window.__verifyIslandCollision = () => {
+            const originalIslands = islands;
+            const island = { x: 0, y: 0, radius: 100, seed1: 0, seed2: 0 };
+            islands = [island];
+
+            const testPlayer = new Player('USA');
+            testPlayer.x = 140; testPlayer.y = 0; testPlayer.vx = -10; testPlayer.vy = 0;
+            resolveIslandCollision(testPlayer);
+            const playerClearance = shipIslandClearance(testPlayer);
+            const playerStopped = testPlayer.vx >= 0 && testPlayer.x >= outerIslandShorelineRadius(island, 0) + playerClearance;
+
+            const angledPlayer = new Player('USA');
+            angledPlayer.x = 100; angledPlayer.y = 100; angledPlayer.vx = -5; angledPlayer.vy = -5;
+            resolveIslandCollision(angledPlayer);
+            const angledDistance = Math.hypot(angledPlayer.x, angledPlayer.y);
+            const angledClear = angledDistance >= outerIslandShorelineRadius(island, Math.atan2(angledPlayer.y, angledPlayer.x)) + shipIslandClearance(angledPlayer);
+
+            const enemy = new Enemy('DESTROYER', 'Japan');
+            enemy.x = 140; enemy.y = 0; enemy.angle = Math.PI;
+            enemy.x += Math.cos(enemy.angle) * enemy.spec.speed;
+            enemy.y += Math.sin(enemy.angle) * enemy.spec.speed;
+            resolveIslandCollision(enemy);
+            const enemyClear = Math.hypot(enemy.x, enemy.y) >= outerIslandShorelineRadius(island, Math.atan2(enemy.y, enemy.x)) + shipIslandClearance(enemy);
+            islands = originalIslands;
+            const germanDimensions = getHullDimensions(50, 'Germany');
+            return {
+                playerStopped,
+                angledClear,
+                enemyClear,
+                playerHullClearance: playerClearance > testPlayer.radius,
+                germanRenderLength: germanDimensions.length,
+                germanCollisionClearance: shipIslandClearance({ radius: 50, nation: 'Germany' }),
+                playerX: testPlayer.x,
+                enemyX: enemy.x
+            };
+        };
     }
     document.getElementById('background-layer').classList.add('hidden'); document.getElementById('menu-overlay').classList.add('hidden');
     document.getElementById('hud-overlay').classList.remove('hidden'); document.getElementById('minimap-container').classList.remove('hidden');

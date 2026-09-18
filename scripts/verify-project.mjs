@@ -60,6 +60,29 @@ async function verifyDefeat(browser) {
   await page.close();
 }
 
+async function verifyIslandCollision(browser) {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  page.on("pageerror", (error) => { throw error; });
+  await page.goto(`${baseUrl}/?verify-island-collision`, { waitUntil: "networkidle" });
+  await page.getByText("Click to Engage", { exact: true }).click();
+  await page.getByRole("button", { name: "Skirmish", exact: true }).click();
+  await page.getByRole("button", { name: /US NAVY/ }).click();
+  await page.getByText("BATTLESHIP", { exact: true }).waitFor();
+  const result = await page.evaluate(() => window.__verifyIslandCollision?.());
+  if (
+    !result ||
+    !result.playerStopped ||
+    !result.angledClear ||
+    !result.enemyClear ||
+    !result.playerHullClearance ||
+    result.germanRenderLength !== 105 ||
+    result.germanCollisionClearance <= result.germanRenderLength
+  ) {
+    throw new Error(`Island collision failed: ${JSON.stringify(result)}`);
+  }
+  await page.close();
+}
+
 async function verifyTouch(browser) {
   const context = await browser.newContext({ ...devices["iPhone 13"] });
   const page = await context.newPage();
@@ -83,6 +106,7 @@ try {
   try {
     await verifyDesktop(browser);
     await verifyDefeat(browser);
+    await verifyIslandCollision(browser);
     await verifyTouch(browser);
   } finally {
     await browser.close();
