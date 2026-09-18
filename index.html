@@ -282,6 +282,12 @@
             </div>
         </div>
 
+        <div id="defeat-menu" class="max-w-md w-full menu-card hidden text-center">
+            <h2 class="text-3xl font-black mb-4 text-red-500 uppercase italic">Mission Lost</h2>
+            <p class="text-slate-300 mb-8">Hull integrity depleted. The task force has been lost.</p>
+            <button onclick="confirmEndRun()" class="w-full btn-primary pointer-events-auto">Return to Command</button>
+        </div>
+
         <div id="levelup-menu" class="hidden max-w-4xl w-full">
             <h2 class="text-4xl font-black mb-10 text-center italic text-sky-400 tracking-widest uppercase">Select Refit</h2>
             <div id="levelup-choices" class="grid grid-cols-1 md:grid-cols-3 gap-8"></div>
@@ -345,7 +351,7 @@ function transitionToMainMenu() {
 
 function showSubMenu(menuId) {
     document.getElementById('menu-overlay').classList.remove('hidden');
-    ['main-menu', 'nation-select', 'options-menu', 'credits-menu', 'confirm-end-menu', 'levelup-menu']
+    ['main-menu', 'nation-select', 'options-menu', 'credits-menu', 'confirm-end-menu', 'defeat-menu', 'levelup-menu']
     .forEach(id => document.getElementById(id).classList.add('hidden'));
     document.getElementById(menuId).classList.remove('hidden');
 }
@@ -366,6 +372,16 @@ function confirmEndRun() {
 function togglePause() {
     if (gameState === 'PLAYING') { gameState = 'PAUSED'; showSubMenu('options-menu'); }
     else if (gameState === 'PAUSED') { handleMenuExit(); }
+}
+
+function handlePlayerDefeat() {
+    if (!player || player.health > 0 || gameState !== 'PLAYING') return;
+    player.health = 0;
+    player.waypoint = null;
+    projectiles = [];
+    gameState = 'DEFEATED';
+    updateDOM();
+    showSubMenu('defeat-menu');
 }
 
 function toggleFPS() {
@@ -775,6 +791,7 @@ function gameLoop(timestamp) {
                 if (player) player.update(TIME_STEP);
                 enemies.forEach((e, i) => { e.update(TIME_STEP); if (e.health <= 0) { enemies.splice(i,1); for(let j=0; j<6; j++) drops.push(new Drop(e.x, e.y, 25)); for(let k=0; k<12; k++) particles.push(new Particle(e.x, e.y, (Math.random()-0.5)*12, (Math.random()-0.5)*12, 1200, '#475569', 3+Math.random()*5)); } });
                 projectiles.forEach((p, i) => { p.update(TIME_STEP); if (p.life <= 0) projectiles.splice(i,1); });
+                handlePlayerDefeat();
                 drops.forEach((d, i) => { if (d.update(TIME_STEP)) drops.splice(i,1); });
                 particles = particles.filter(p => p.update(TIME_STEP));
                 for(let i=damagePopups.length-1; i>=0; i--) { damagePopups[i].y += damagePopups[i].vy; damagePopups[i].life -= TIME_STEP; if (damagePopups[i].life <= 0) damagePopups.splice(i,1); }
@@ -847,6 +864,9 @@ function startGame() {
     player = new Player(selectedNation); enemies = []; projectiles = []; drops = []; damagePopups = []; particles = []; wave = 1;
     for(let i=0; i<5; i++) enemies.push(new Enemy('DESTROYER', 'Japan'));
     gameState = 'PLAYING';
+    if (new URLSearchParams(window.location.search).has('verify-defeat')) {
+        window.__verifyDefeat = () => { if (player) { player.health = 0; handlePlayerDefeat(); } };
+    }
     document.getElementById('background-layer').classList.add('hidden'); document.getElementById('menu-overlay').classList.add('hidden');
     document.getElementById('hud-overlay').classList.remove('hidden'); document.getElementById('minimap-container').classList.remove('hidden');
     lastTime = performance.now(); requestAnimationFrame(gameLoop);

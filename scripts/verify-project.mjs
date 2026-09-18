@@ -44,6 +44,22 @@ async function verifyDesktop(browser) {
   await page.close();
 }
 
+async function verifyDefeat(browser) {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  page.on("pageerror", (error) => { throw error; });
+  await page.goto(`${baseUrl}/?verify-defeat`, { waitUntil: "networkidle" });
+  await page.getByText("Click to Engage", { exact: true }).click();
+  await page.getByRole("button", { name: "Skirmish", exact: true }).click();
+  await page.getByRole("button", { name: /US NAVY/ }).click();
+  await page.getByText("BATTLESHIP", { exact: true }).waitFor();
+  const invoked = await page.evaluate(() => { window.__verifyDefeat?.(); return typeof window.__verifyDefeat === "function"; });
+  if (!invoked) throw new Error("Defeat verification hook was not installed.");
+  await page.getByRole("heading", { name: "Mission Lost", exact: true }).waitFor();
+  await page.getByText("Hull integrity depleted.", { exact: false }).waitFor();
+  await page.screenshot({ path: `${outputDirectory}/defeat-menu.png`, fullPage: true });
+  await page.close();
+}
+
 async function verifyTouch(browser) {
   const context = await browser.newContext({ ...devices["iPhone 13"] });
   const page = await context.newPage();
@@ -66,6 +82,7 @@ try {
   const browser = await chromium.launch({ headless: true });
   try {
     await verifyDesktop(browser);
+    await verifyDefeat(browser);
     await verifyTouch(browser);
   } finally {
     await browser.close();
