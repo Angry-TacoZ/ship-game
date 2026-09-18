@@ -75,8 +75,10 @@ For meaningful AI, agentic, retrieval, scoring, ranking, parsing, recommendation
 
 ## Pull Request Boundaries
 
-- For larger feature work, meaningful refactors, public-facing changes, security-relevant changes, data-model changes, Firebase/function changes, or portfolio-relevant work, prefer a focused branch and pull request.
-- Small fixes may be committed directly when the user explicitly prioritizes speed or a pull request would add needless overhead.
+- All application behavior, gameplay, user-facing, configuration, dependency, security, deployment, and portfolio changes must use a focused `codex/<short-change-name>` branch and pull request.
+- Direct commits or pushes to the target branch are permitted only for ordinary explanation-only or documentation-only work that cannot affect runtime behavior and is outside the repository's agent, harness, governance, instruction, and workflow-policy surface, and only when James explicitly states within Codex that the pull-request workflow should be bypassed for that change.
+- Changes to `AGENTS.md`, `SOUL.md`, `RULES.md`, files under `workflows/` or `skills/`, or any other repository-local file that governs agent behavior or engineering policy always require the focused branch and pull request, even when the change is documentation-only.
+- If James has not explicitly stated that exception in the current Codex instructions, create the focused branch and pull request even when the change is small.
 - Keep each pull request to one coherent change.
 - Do not mix unrelated cleanup, visual polish, dependency upgrades, and behavior changes unless they are necessary for the same outcome.
 - Preserve unrelated dirty worktree changes and stage files explicitly.
