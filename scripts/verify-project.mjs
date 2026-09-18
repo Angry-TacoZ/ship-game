@@ -96,6 +96,44 @@ async function verifyAnimationLoop(browser) {
   await page.close();
 }
 
+async function verifyWaveProgression(browser) {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  page.on("pageerror", (error) => { throw error; });
+  await page.goto(`${baseUrl}/?verify-wave-progression`, { waitUntil: "networkidle" });
+  await page.getByText("Click to Engage", { exact: true }).click();
+  await page.getByRole("button", { name: "Skirmish", exact: true }).click();
+  await page.getByRole("button", { name: /US NAVY/ }).click();
+  await page.getByText("BATTLESHIP", { exact: true }).waitFor();
+  const result = await page.evaluate(() => {
+    const verify = window.__verifyWaveProgression;
+    return {
+      wave1: verify.roster(1),
+      wave2: verify.roster(2),
+      wave5: verify.roster(5),
+      outOfRange: verify.roster(6),
+      beforeVictory: verify.state()
+    };
+  });
+  if (
+    !result.wave1.spawned ||
+    JSON.stringify(result.wave1.counts) !== JSON.stringify({ PT_BOAT: 5 }) ||
+    JSON.stringify(result.wave2.counts) !== JSON.stringify({ PT_BOAT: 6, DESTROYER: 2 }) ||
+    JSON.stringify(result.wave5.counts) !== JSON.stringify({ PT_BOAT: 12, DESTROYER: 8 }) ||
+    result.outOfRange.spawned !== false ||
+    Object.keys(result.outOfRange.counts).length !== 0
+  ) {
+    throw new Error(`Wave roster verification failed: ${JSON.stringify(result)}`);
+  }
+  const finalState = await page.evaluate(() => {
+    window.__verifyWaveProgression.completeFinalWave();
+    return window.__verifyWaveProgression.state();
+  });
+  if (finalState.wave !== 5 || finalState.gameState !== "WAVE_END" || !finalState.victoryVisible) {
+    throw new Error(`Final wave verification failed: ${JSON.stringify(finalState)}`);
+  }
+  await page.close();
+}
+
 async function verifyTouch(browser) {
   const context = await browser.newContext({ ...devices["iPhone 13"] });
   const page = await context.newPage();
@@ -121,6 +159,7 @@ try {
     await verifyDefeat(browser);
     await verifyIslandCollision(browser);
     await verifyAnimationLoop(browser);
+    await verifyWaveProgression(browser);
     await verifyTouch(browser);
   } finally {
     await browser.close();

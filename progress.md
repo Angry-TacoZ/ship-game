@@ -13,6 +13,12 @@ Original prompt: Recover the playable browser naval game and continue its develo
 - Add deterministic simulation hooks before writing deeper gameplay-regression tests.
 - Fix the documented duplicate-animation-loop issue in a focused change.
 
+## Five-wave enemy progression
+
+- Added finite rosters for five waves: PT boats only in wave 1, destroyers introduced in wave 2, and increasing mixed fleets through wave 5.
+- Wave 5 now ends at a Mission Complete screen instead of opening an unbounded wave 6.
+- `npm run verify` passes after the progression change.
+
 ## Island collision fix
 
 - Added shared collision resolution against the procedural outer shoreline, with clearance based on the rendered hull footprint.
