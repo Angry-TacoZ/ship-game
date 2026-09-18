@@ -318,6 +318,7 @@ let width, height, gameState = 'SPLASH', player = null;
 let enemies = [], projectiles = [], drops = [], islands = [], damagePopups = [], particles = [];
 let wave = 1, scrap = 0, selectedNation = 'USA', zoom = 0.45;
 let sfxVol = 0.8, musicVol = 0.5, weatherVol = 0.4, keys = {}, lastTime = 0, accumulator = 0;
+let animationLoopActive = false, animationLoopStarts = 0;
 const TIME_STEP = 1000 / 60;
 
 let showFPS = false, frameCount = 0, fpsLastTime = 0, currentFPS = 0, isMobileUI = false, autoThrust = false;
@@ -956,9 +957,21 @@ function startGame() {
             };
         };
     }
+    if (new URLSearchParams(window.location.search).has('verify-animation-loop')) {
+        window.__verifyAnimationLoop = () => {
+            startGame();
+            startGame();
+            return animationLoopStarts;
+        };
+    }
     document.getElementById('background-layer').classList.add('hidden'); document.getElementById('menu-overlay').classList.add('hidden');
     document.getElementById('hud-overlay').classList.remove('hidden'); document.getElementById('minimap-container').classList.remove('hidden');
-    lastTime = performance.now(); requestAnimationFrame(gameLoop);
+    lastTime = performance.now();
+    if (!animationLoopActive) {
+        animationLoopActive = true;
+        animationLoopStarts++;
+        requestAnimationFrame(gameLoop);
+    }
 }
 
 function resize() { width = window.innerWidth; height = window.innerHeight; canvas.width = width; canvas.height = height; mCanvas.width = 280; mCanvas.height = 280; }
