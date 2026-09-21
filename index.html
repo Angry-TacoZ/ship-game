@@ -1017,6 +1017,8 @@ function updateDOM() {
 }
 
 function showLevelUp() {
+    if (gameState === 'UPGRADING') return;
+    gameState = 'UPGRADING';
     showSubMenu('levelup-menu');
     const container = document.getElementById('levelup-choices');
     container.innerHTML = '';
@@ -1029,13 +1031,21 @@ function showLevelUp() {
         const btn = document.createElement('button');
         btn.className = 'menu-card hover:border-sky-400 transition-all text-left pointer-events-auto';
         btn.innerHTML = `<h3 class="text-xl font-black mb-2">${u.t}</h3><p class="text-sm text-slate-400">${u.d}</p>`;
-        btn.onclick = () => { u.v(); nextWave(); };
+        btn.onclick = () => {
+            if (gameState !== 'UPGRADING') return;
+            u.v();
+            nextWave();
+        };
         container.appendChild(btn);
     });
 }
 
 function nextWave() {
-    if (wave >= 5) return;
+    if (wave >= 5) {
+        document.getElementById('menu-overlay').classList.add('hidden');
+        gameState = 'PLAYING'; lastTime = performance.now();
+        return;
+    }
     wave++;
     document.getElementById('menu-overlay').classList.add('hidden');
     document.getElementById('wave-display').innerText = `WAVE ${wave}`;
@@ -1229,6 +1239,31 @@ function startGame() {
             startGame();
             startGame();
             return animationLoopStarts;
+        };
+    }
+    if (new URLSearchParams(window.location.search).has('verify-wave5-levelup')) {
+        window.__verifyWave5LevelUp = () => {
+            wave = 5;
+            enemies = [new Enemy('PT_BOAT', 'Japan')];
+            gameState = 'PLAYING';
+            document.getElementById('wave-display').innerText = `WAVE ${wave} / 5`;
+            player.xp = player.xpToNext;
+            player.update(TIME_STEP);
+            updateDOM();
+            const state = () => ({
+                wave,
+                gameState,
+                damageMult: player.damageMult,
+                menuVisible: !document.getElementById('menu-overlay').classList.contains('hidden') &&
+                    !document.getElementById('levelup-menu').classList.contains('hidden')
+            });
+            const before = state();
+            const choice = document.querySelector('#levelup-choices button');
+            choice.click();
+            const afterFirstClick = state();
+            choice.click();
+            const afterSecondClick = state();
+            return { before, afterFirstClick, afterSecondClick };
         };
     }
     if (new URLSearchParams(window.location.search).has('verify-wave-progression')) {
