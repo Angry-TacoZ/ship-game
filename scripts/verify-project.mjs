@@ -99,6 +99,21 @@ async function verifyEnemyOrbit(browser) {
   await page.close();
 }
 
+async function verifySecondaryArcs(browser) {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  page.on("pageerror", (error) => { throw error; });
+  await page.goto(`${baseUrl}/?verify-secondary-arcs`, { waitUntil: "networkidle" });
+  await page.getByText("Click to Engage", { exact: true }).click();
+  await page.getByRole("button", { name: "Skirmish", exact: true }).click();
+  await page.getByRole("button", { name: /US NAVY/ }).click();
+  await page.getByText("BATTLESHIP", { exact: true }).waitFor();
+  const result = await page.evaluate(() => window.__verifySecondaryArcs?.());
+  if (!result || Object.values(result).some((passed) => !passed)) {
+    throw new Error(`Secondary arc verification failed: ${JSON.stringify(result)}`);
+  }
+  await page.close();
+}
+
 async function verifyAnimationLoop(browser) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
   page.on("pageerror", (error) => { throw error; });
@@ -175,6 +190,7 @@ try {
     await verifyDefeat(browser);
     await verifyIslandCollision(browser);
     await verifyEnemyOrbit(browser);
+    await verifySecondaryArcs(browser);
     await verifyAnimationLoop(browser);
     await verifyWaveProgression(browser);
     await verifyTouch(browser);

@@ -715,13 +715,23 @@ class Player {
         let mt = null, md = this.config.main.range; enemies.forEach(e => { const d = Math.hypot(e.x-this.x, e.y-this.y); if (d < md) { md = d; mt = e; } });
         if (mt) { const tt = Math.atan2(mt.y - this.y, mt.x - this.x); let df = tt - this.turretAngle; while(df < -Math.PI) df += Math.PI*2; while(df > Math.PI) df -= Math.PI*2; this.turretAngle += Math.sign(df) * Math.min(Math.abs(df), this.traverseSpeed * ts); }
         this.mainTimers.forEach((tm, i) => { this.mainTimers[i] -= dt; if (this.mainTimers[i] <= 0 && mt) { this.fireMain(i); this.mainTimers[i] = (this.config.main.reload * this.reloadMult); } });
-        this.secTimers.forEach((st, i) => { this.secTimers[i] -= dt; if (this.secTimers[i] <= 0) { let st = null; enemies.forEach(e => { if (Math.hypot(e.x-this.x, e.y-this.y) < this.config.secondary.range) st = e; }); if (st) { this.fireSec(i, st); this.secTimers[i] = this.config.secondary.reload * this.reloadMult; } } });
+        this.secTimers.forEach((st, i) => { this.secTimers[i] -= dt; if (this.secTimers[i] <= 0) { const target = this.getSecondaryTarget(i); if (target) { this.fireSec(i, target); this.secTimers[i] = this.config.secondary.reload * this.reloadMult; } } });
         if (this.xp >= this.xpToNext) { this.level++; this.xp -= this.xpToNext; this.xpToNext *= 1.35; showLevelUp(); }
     }
     fireMain(idx) {
         const off = (idx - (this.config.main.turrets-1)/2) * (this.radius * 0.7), tX = this.x + Math.cos(this.angle)*off, tY = this.y + Math.sin(this.angle)*off;
         for(let i=0; i<this.config.main.barrels; i++) projectiles.push(new Projectile(tX, tY, this.turretAngle + (Math.random()-0.5)*0.04, true, 11, this.config.main.damage * this.damageMult, '#ef4444', 13));
         SoundManager.playMainGun();
+    }
+    getSecondaryTarget(idx, targets = enemies) {
+        const side = idx % 2 === 0 ? 1 : -1;
+        let target = null;
+        targets.forEach(enemy => {
+            const dx = enemy.x - this.x, dy = enemy.y - this.y;
+            const lateralOffset = -Math.sin(this.angle) * dx + Math.cos(this.angle) * dy;
+            if (Math.hypot(dx, dy) < this.config.secondary.range && lateralOffset * side >= 0) target = enemy;
+        });
+        return target;
     }
     fireSec(idx, target) {
         const side = idx % 2 === 0 ? 1 : -1, step = Math.floor(idx / 2), relX = -20 + step * 10, relY = side * 32;
@@ -1049,6 +1059,22 @@ function startGame() {
                 };
             };
             return { destroyer: verifyUnit('DESTROYER', 2200), ptBoat: verifyUnit('PT_BOAT', 900) };
+        };
+    }
+    if (new URLSearchParams(window.location.search).has('verify-secondary-arcs')) {
+        window.__verifySecondaryArcs = () => {
+            const testPlayer = new Player('USA');
+            testPlayer.angle = 0;
+            const starboardTarget = { x: 0, y: 500 };
+            const portTarget = { x: 0, y: -500 };
+            const centerlineTarget = { x: 500, y: 0 };
+            return {
+                starboardFiresStarboard: testPlayer.getSecondaryTarget(0, [portTarget, starboardTarget]) === starboardTarget,
+                starboardRejectsPort: testPlayer.getSecondaryTarget(0, [portTarget]) === null,
+                portFiresPort: testPlayer.getSecondaryTarget(1, [starboardTarget, portTarget]) === portTarget,
+                portRejectsStarboard: testPlayer.getSecondaryTarget(1, [starboardTarget]) === null,
+                centerlineAvailableToBoth: testPlayer.getSecondaryTarget(0, [centerlineTarget]) === centerlineTarget && testPlayer.getSecondaryTarget(1, [centerlineTarget]) === centerlineTarget
+            };
         };
     }
     if (new URLSearchParams(window.location.search).has('verify-animation-loop')) {
