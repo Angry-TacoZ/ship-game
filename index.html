@@ -342,10 +342,22 @@ const ENEMY_SPECS = {
     'DESTROYER': { radius: 35, health: 650, speed: 4.5, damage: 40, reload: 3800, range: 1800, turrets: 2, scrap: 100 }
 };
 
-function getEnemyOrbitRadius(spec) {
+function getEnemyOrbitRadius(spec, randomValue = Math.random()) {
     const preferredRadius = spec.range * 0.82;
     const variation = spec.range * 0.06;
-    return Math.max(spec.range * 0.7, Math.min(spec.range * 0.9, preferredRadius + (Math.random() - 0.5) * variation * 2));
+    return Math.max(spec.range * 0.7, Math.min(spec.range * 0.9, preferredRadius + (randomValue - 0.5) * variation * 2));
+}
+
+function shortestAngleDelta(from, to) {
+    let delta = to - from;
+    while (delta < -Math.PI) delta += Math.PI * 2;
+    while (delta > Math.PI) delta -= Math.PI * 2;
+    return delta;
+}
+
+function moveTowards(value, target, maxDelta) {
+    const delta = target - value;
+    return value + Math.sign(delta) * Math.min(Math.abs(delta), maxDelta);
 }
 
 const WAVE_ROSTERS = {
@@ -773,12 +785,22 @@ class Enemy {
         this.orbitRadius = getEnemyOrbitRadius(this.spec);
         this.orbitShiftTimer = 2600 + Math.random() * 2200;
         this.orbitShiftCount = 0;
+        this.vx = 0; this.vy = 0; this.currentSpeed = 0;
+        this.turnRate = ck === 'PT_BOAT' ? 0.02 : 0.011;
+        this.acceleration = this.spec.speed * 0.035;
+        this.deceleration = this.spec.speed * 0.055;
     }
     update(dt) {
-        const ts = dt/16.6; let dist = Math.hypot(player.x-this.x, player.y-this.y);
-        let targetAngle = Math.atan2(player.y - this.y, player.x - this.x);
-        let tdf = targetAngle - this.turretAngle; while(tdf < -Math.PI) tdf += Math.PI*2; while(tdf > Math.PI) tdf -= Math.PI*2;
-        this.turretAngle += Math.sign(tdf) * Math.min(Math.abs(tdf), 0.02 * ts);
+        const ts = dt/16.6;
+        const directDistance = Math.hypot(player.x - this.x, player.y - this.y);
+        const leadFrames = Math.min(72, 24 + directDistance / Math.max(this.spec.speed, 1) * 0.18);
+        const steeringTargetX = player.x + player.vx * leadFrames;
+        const steeringTargetY = player.y + player.vy * leadFrames;
+        this.steeringTargetX = steeringTargetX; this.steeringTargetY = steeringTargetY;
+        const dist = Math.hypot(steeringTargetX - this.x, steeringTargetY - this.y);
+        const targetAngle = Math.atan2(player.y - this.y, player.x - this.x);
+        const turretError = shortestAngleDelta(this.turretAngle, targetAngle);
+        this.turretAngle += Math.sign(turretError) * Math.min(Math.abs(turretError), 0.02 * ts);
         this.orbitShiftTimer -= dt;
         if (this.orbitShiftTimer <= 0) {
             this.orbitDirection *= -1;
@@ -788,26 +810,32 @@ class Enemy {
         }
         const radial = dist - this.orbitRadius;
         const radialStrength = Math.max(-1, Math.min(1, radial / 260));
-        const inwardX = (player.x - this.x) / Math.max(dist, 1);
-        const inwardY = (player.y - this.y) / Math.max(dist, 1);
+        const inwardX = (steeringTargetX - this.x) / Math.max(dist, 1);
+        const inwardY = (steeringTargetY - this.y) / Math.max(dist, 1);
         const tangentX = -inwardY * this.orbitDirection;
         const tangentY = inwardX * this.orbitDirection;
         const moveX = inwardX * radialStrength + tangentX * 0.92;
         const moveY = inwardY * radialStrength + tangentY * 0.92;
-        const moveLength = Math.hypot(moveX, moveY) || 1;
-        const velocityAngle = Math.atan2(moveY, moveX);
-        let df = velocityAngle - this.angle; while(df < -Math.PI) df += Math.PI*2; while(df > Math.PI) df -= Math.PI*2;
-        this.angle += Math.sign(df) * Math.min(Math.abs(df), 0.012 * ts);
-        this.x += moveX / moveLength * this.spec.speed * ts;
-        this.y += moveY / moveLength * this.spec.speed * ts;
+        const desiredHeading = Math.atan2(moveY, moveX);
+        const headingError = shortestAngleDelta(this.angle, desiredHeading);
+        this.angle += Math.sign(headingError) * Math.min(Math.abs(headingError), this.turnRate * ts);
+        const turnSlowdown = Math.max(0.4, 1 - Math.abs(headingError) / Math.PI * 0.6);
+        const desiredSpeed = this.spec.speed * turnSlowdown;
+        const speedRate = desiredSpeed > this.currentSpeed ? this.acceleration : this.deceleration;
+        this.currentSpeed = moveTowards(this.currentSpeed, desiredSpeed, speedRate * ts);
+        this.vx = Math.cos(this.angle) * this.currentSpeed;
+        this.vy = Math.sin(this.angle) * this.currentSpeed;
+        this.x += this.vx * ts;
+        this.y += this.vy * ts;
         resolveIslandCollision(this);
+        this.currentSpeed = Math.hypot(this.vx, this.vy);
 
         // Enemy Wake Enhancement
-        if (dist > 100) {
-            const speed = this.spec.speed;
+        if (this.currentSpeed > 0.25) {
+            const speed = this.currentSpeed;
             particles.push(new Particle(
                 this.x - Math.cos(this.angle)*this.radius*0.9, this.y - Math.sin(this.angle)*this.radius*0.9,
-                -Math.cos(this.angle)*speed*0.3, -Math.sin(this.angle)*speed*0.3,
+                -this.vx*0.3, -this.vy*0.3,
                 600, 'rgba(255,255,255,0.25)', 3, 0.22
             ));
             for(let side of [-1, 1]) {
@@ -820,7 +848,8 @@ class Enemy {
             }
         }
 
-        this.timer -= dt; if (this.timer <= 0 && dist < this.spec.range) { projectiles.push(new Projectile(this.x, this.y, this.turretAngle, false, 8, this.spec.damage, '#ef4444', 8)); this.timer = this.spec.reload; }
+        const firingDistance = Math.hypot(player.x - this.x, player.y - this.y);
+        this.timer -= dt; if (this.timer <= 0 && firingDistance < this.spec.range) { projectiles.push(new Projectile(this.x, this.y, this.turretAngle, false, 8, this.spec.damage, '#ef4444', 8)); this.timer = this.spec.reload; }
     }
     draw() {
         ctx.save(); ctx.translate(this.x, this.y); ctx.rotate(this.angle);
@@ -1032,31 +1061,58 @@ function startGame() {
     if (new URLSearchParams(window.location.search).has('verify-enemy-orbit')) {
         window.__verifyEnemyOrbit = () => {
             const verifyUnit = (ck, startDistance) => {
+                const originalIslands = islands;
+                const originalPlayerVelocity = { vx: player.vx, vy: player.vy };
+                islands = [];
                 const testEnemy = new Enemy(ck, 'Japan');
                 testEnemy.x = player.x + startDistance; testEnemy.y = player.y;
-                testEnemy.orbitRadius = getEnemyOrbitRadius(testEnemy.spec);
-                testEnemy.orbitDirection = 1; testEnemy.orbitShiftTimer = 100;
+                testEnemy.angle = Math.PI; testEnemy.turretAngle = Math.PI;
+                testEnemy.orbitRadius = getEnemyOrbitRadius(testEnemy.spec, 0.5);
+                testEnemy.orbitDirection = 1; testEnemy.orbitShiftTimer = Infinity;
                 const start = { x: testEnemy.x, y: testEnemy.y };
                 const startDistanceFromPlayer = Math.hypot(player.x - testEnemy.x, player.y - testEnemy.y);
-                testEnemy.update(1000);
-                const firstDistance = Math.hypot(player.x - testEnemy.x, player.y - testEnemy.y);
-                const firstPosition = { x: testEnemy.x, y: testEnemy.y };
-                testEnemy.update(2000);
+                let maxSpeedDelta = 0, maxHeadingDelta = 0;
+                for (let step = 0; step < 240; step++) {
+                    const previousSpeed = testEnemy.currentSpeed, previousAngle = testEnemy.angle;
+                    testEnemy.update(TIME_STEP);
+                    maxSpeedDelta = Math.max(maxSpeedDelta, Math.abs(testEnemy.currentSpeed - previousSpeed));
+                    maxHeadingDelta = Math.max(maxHeadingDelta, Math.abs(shortestAngleDelta(previousAngle, testEnemy.angle)));
+                }
                 const secondDistance = Math.hypot(player.x - testEnemy.x, player.y - testEnemy.y);
+                const settledOrbitRadius = testEnemy.orbitRadius;
+                const firstPosition = { x: testEnemy.x, y: testEnemy.y };
+                player.vx = 3; player.vy = -2;
+                const previousAngle = testEnemy.angle;
+                testEnemy.update(TIME_STEP);
+                const playerLeadApplied = Math.hypot(testEnemy.steeringTargetX - player.x, testEnemy.steeringTargetY - player.y) > 0;
+                const playerReactionSmooth = Math.abs(shortestAngleDelta(previousAngle, testEnemy.angle)) <= testEnemy.turnRate * 1.01;
+                testEnemy.orbitShiftTimer = 0;
+                const angleBeforeShift = testEnemy.angle;
+                testEnemy.update(TIME_STEP);
                 testEnemy.x = player.x + testEnemy.orbitRadius;
                 testEnemy.y = player.y;
                 const firingDistance = Math.hypot(player.x - testEnemy.x, player.y - testEnemy.y);
-                return {
+                const result = {
                     moved: Math.hypot(testEnemy.x - firstPosition.x, testEnemy.y - firstPosition.y) > 0,
-                    approachedCombatRange: firstDistance < startDistanceFromPlayer,
-                    staysNearCombatRange: Math.abs(secondDistance - testEnemy.orbitRadius) < 260,
+                    approachedCombatRange: secondDistance < startDistanceFromPlayer,
+                    staysNearCombatRange: Math.abs(secondDistance - settledOrbitRadius) < 260,
                     shiftedOrbit: testEnemy.orbitShiftCount === 1,
                     orbitInsideWeaponRange: testEnemy.orbitRadius < testEnemy.spec.range,
                     canFireAtOrbit: firingDistance < testEnemy.spec.range,
+                    smoothAcceleration: maxSpeedDelta <= testEnemy.deceleration * 1.01,
+                    smoothTurning: maxHeadingDelta <= testEnemy.turnRate * 1.01,
+                    shiftTurnsSmoothly: Math.abs(shortestAngleDelta(angleBeforeShift, testEnemy.angle)) <= testEnemy.turnRate * 1.01,
+                    playerLeadApplied,
+                    playerReactionSmooth,
                     displacement: Math.hypot(testEnemy.x - start.x, testEnemy.y - start.y),
+                    settledDistance: secondDistance,
+                    settledOrbitRadius,
                     orbitRadius: testEnemy.orbitRadius,
                     weaponRange: testEnemy.spec.range
                 };
+                player.vx = originalPlayerVelocity.vx; player.vy = originalPlayerVelocity.vy;
+                islands = originalIslands;
+                return result;
             };
             return { destroyer: verifyUnit('DESTROYER', 2200), ptBoat: verifyUnit('PT_BOAT', 900) };
         };

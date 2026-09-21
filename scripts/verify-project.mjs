@@ -93,7 +93,7 @@ async function verifyEnemyOrbit(browser) {
   await page.getByText("BATTLESHIP", { exact: true }).waitFor();
   const result = await page.evaluate(() => window.__verifyEnemyOrbit?.());
   const units = [result?.destroyer, result?.ptBoat];
-  if (units.some((unit) => !unit?.moved || !unit?.approachedCombatRange || !unit?.staysNearCombatRange || !unit?.shiftedOrbit || !unit?.orbitInsideWeaponRange || !unit?.canFireAtOrbit)) {
+  if (units.some((unit) => !unit?.moved || !unit?.approachedCombatRange || !unit?.staysNearCombatRange || !unit?.shiftedOrbit || !unit?.orbitInsideWeaponRange || !unit?.canFireAtOrbit || !unit?.smoothAcceleration || !unit?.smoothTurning || !unit?.shiftTurnsSmoothly || !unit?.playerLeadApplied || !unit?.playerReactionSmooth)) {
     throw new Error(`Enemy orbit verification failed: ${JSON.stringify(result)}`);
   }
   await page.close();

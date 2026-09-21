@@ -36,3 +36,9 @@ Original prompt: Recover the playable browser naval game and continue its develo
 
 - Secondary mounts now only select targets within their own port or starboard 180-degree arc; targets directly on the bow/stern centerline remain available to either side.
 - Added `?verify-secondary-arcs` coverage for each side accepting its own arc and rejecting the opposite side.
+
+## Smooth enemy steering
+
+- Replaced direct full-speed enemy position stepping with hull heading, velocity, acceleration, and braking state.
+- Enemy hulls now turn at class-specific rates, slow through hard turns, and steer toward a short predicted player position.
+- Extended `?verify-enemy-orbit` coverage to require bounded speed/heading changes, smooth orbit shifts, and smooth response to player movement for both enemy types.
