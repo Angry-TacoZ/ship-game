@@ -31,3 +31,8 @@ Original prompt: Recover the playable browser naval game and continue its develo
 - Replaced the enemy dead-stop at 700 units with a moving combat orbit that corrects radius while applying tangential movement.
 - Enemies periodically reverse orbit direction and vary their target radius to create readable evasive shifts.
 - Added `?verify-enemy-orbit` browser verification for movement, approach, radius maintenance, and orbit shifting.
+
+## Secondary firing arcs
+
+- Secondary mounts now only select targets within their own port or starboard 180-degree arc; targets directly on the bow/stern centerline remain available to either side.
+- Added `?verify-secondary-arcs` coverage for each side accepting its own arc and rejecting the opposite side.
