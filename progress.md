@@ -25,3 +25,9 @@ Original prompt: Recover the playable browser naval game and continue its develo
 - Player ships remove inward velocity when they collide, preserving shoreline sliding; enemies use position constraints because their movement remains direct position stepping.
 - Added `?verify-island-collision` browser verification coverage.
 - `npm run verify` passes on the island-collision branch.
+
+## Enemy orbit behavior
+
+- Replaced the enemy dead-stop at 700 units with a moving combat orbit that corrects radius while applying tangential movement.
+- Enemies periodically reverse orbit direction and vary their target radius to create readable evasive shifts.
+- Added `?verify-enemy-orbit` browser verification for movement, approach, radius maintenance, and orbit shifting.
