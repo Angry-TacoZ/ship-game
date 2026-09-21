@@ -789,7 +789,7 @@ class Enemy {
         this.acceleration = this.spec.speed * 0.035;
         this.deceleration = this.spec.speed * 0.055;
     }
-    getSteeringPlan() {
+    getSteeringPlan(modeOverride = null, crossDirectionOverride = null) {
         const directX = player.x - this.x, directY = player.y - this.y;
         const directDistance = Math.hypot(directX, directY) || 1;
         const inwardX = directX / directDistance, inwardY = directY / directDistance;
@@ -807,15 +807,17 @@ class Enemy {
             return Math.hypot(dx, dy) < outerIslandShorelineRadius(island, angle) + shipIslandClearance(this) + 150;
         });
         const crowded = enemies.some(enemy => enemy !== this && Math.hypot(enemy.x - this.x, enemy.y - this.y) < this.radius + enemy.radius + 120);
-        let mode = 'CROSS';
-        if (nearbyIsland || crowded) mode = 'CLEAR';
-        else if (directDistance < this.spec.range * 0.45 || (closingSpeed > 0.75 && directDistance < this.spec.range * 0.95)) mode = 'SEPARATE';
-        else if (directDistance > this.spec.range * 0.88 || closingSpeed < -0.7) mode = 'APPROACH';
-        else if (Math.hypot(player.vx, player.vy) > 0.6 && Math.abs(lateralPlayerSpeed) > 0.35) mode = 'REPOSITION';
+        let candidateMode = 'CROSS';
+        if (nearbyIsland || crowded) candidateMode = 'CLEAR';
+        else if (directDistance < this.spec.range * 0.45 || (closingSpeed > 0.75 && directDistance < this.spec.range * 0.95)) candidateMode = 'SEPARATE';
+        else if (directDistance > this.spec.range * 0.88 || closingSpeed < -0.7) candidateMode = 'APPROACH';
+        else if (Math.hypot(player.vx, player.vy) > 0.6 && Math.abs(lateralPlayerSpeed) > 0.35) candidateMode = 'REPOSITION';
 
-        if ((mode === 'CROSS' || mode === 'REPOSITION') && Math.abs(lateralPlayerSpeed) > 0.1) this.crossDirection = Math.sign(lateralPlayerSpeed);
-        const tangentX = -predictedInwardY * this.crossDirection;
-        const tangentY = predictedInwardX * this.crossDirection;
+        const candidateCrossDirection = ((candidateMode === 'CROSS' || candidateMode === 'REPOSITION') && Math.abs(lateralPlayerSpeed) > 0.1) ? Math.sign(lateralPlayerSpeed) : this.crossDirection;
+        const mode = modeOverride || candidateMode;
+        const crossDirection = crossDirectionOverride || candidateCrossDirection;
+        const tangentX = -predictedInwardY * crossDirection;
+        const tangentY = predictedInwardX * crossDirection;
         const radialStrength = Math.max(-1, Math.min(1, (predictedDistance - this.orbitRadius) / 260));
         let steerX = predictedInwardX, steerY = predictedInwardY, speedMultiplier = 1;
         if (mode === 'CROSS') {
@@ -838,17 +840,19 @@ class Enemy {
             steerY = clearY / clearLength + tangentY * 0.4;
             speedMultiplier = 0.7;
         }
-        return { mode, desiredHeading: Math.atan2(steerY, steerX), targetX, targetY, speedMultiplier };
+        return { mode, candidateMode, crossDirection, desiredHeading: Math.atan2(steerY, steerX), targetX, targetY, speedMultiplier };
     }
     update(dt) {
         const ts = dt/16.6;
-        const plan = this.getSteeringPlan();
+        const candidatePlan = this.getSteeringPlan();
         this.steeringCooldown -= dt;
-        const urgentMode = plan.mode === 'CLEAR' || plan.mode === 'SEPARATE';
-        if (plan.mode !== this.steeringMode && (urgentMode || this.steeringCooldown <= 0)) {
-            this.steeringMode = plan.mode;
+        const urgentMode = candidatePlan.mode === 'CLEAR' || candidatePlan.mode === 'SEPARATE';
+        if (candidatePlan.mode !== this.steeringMode && (urgentMode || this.steeringCooldown <= 0)) {
+            this.steeringMode = candidatePlan.mode;
+            this.crossDirection = candidatePlan.crossDirection;
             this.steeringCooldown = 350;
         }
+        const plan = this.getSteeringPlan(this.steeringMode, this.crossDirection);
         this.desiredHeading = plan.desiredHeading;
         this.steeringTargetX = plan.targetX; this.steeringTargetY = plan.targetY;
         const targetAngle = Math.atan2(player.y - this.y, player.x - this.x);
@@ -1101,6 +1105,7 @@ function startGame() {
                 const originalIslands = islands;
                 const originalPlayerVelocity = { vx: player.vx, vy: player.vy };
                 islands = [];
+                player.vx = 0; player.vy = 0;
                 const testEnemy = new Enemy(ck, 'Japan');
                 testEnemy.x = player.x + startDistance; testEnemy.y = player.y;
                 testEnemy.angle = Math.PI; testEnemy.turretAngle = Math.PI;
@@ -1108,12 +1113,13 @@ function startGame() {
                 testEnemy.crossDirection = 1;
                 const start = { x: testEnemy.x, y: testEnemy.y };
                 const startDistanceFromPlayer = Math.hypot(player.x - testEnemy.x, player.y - testEnemy.y);
-                let maxSpeedDelta = 0, maxHeadingDelta = 0;
+                let maxSpeedDelta = 0, maxHeadingDelta = 0, maxVelocityHullDifference = 0;
                 for (let step = 0; step < 240; step++) {
                     const previousSpeed = testEnemy.currentSpeed, previousAngle = testEnemy.angle;
                     testEnemy.update(TIME_STEP);
                     maxSpeedDelta = Math.max(maxSpeedDelta, Math.abs(testEnemy.currentSpeed - previousSpeed));
                     maxHeadingDelta = Math.max(maxHeadingDelta, Math.abs(shortestAngleDelta(previousAngle, testEnemy.angle)));
+                    if (testEnemy.currentSpeed > 0.25) maxVelocityHullDifference = Math.max(maxVelocityHullDifference, Math.abs(shortestAngleDelta(testEnemy.angle, Math.atan2(testEnemy.vy, testEnemy.vx))));
                 }
                 const secondDistance = Math.hypot(player.x - testEnemy.x, player.y - testEnemy.y);
                 const settledOrbitRadius = testEnemy.orbitRadius;
@@ -1135,6 +1141,34 @@ function startGame() {
                 const awayPlan = decisionEnemy.getSteeringPlan();
                 decisionEnemy.crossDirection = 1; player.vx = 3; player.vy = 0;
                 const closingPlan = decisionEnemy.getSteeringPlan();
+
+                const cooldownEnemy = new Enemy(ck, 'Japan');
+                cooldownEnemy.x = player.x + cooldownEnemy.spec.range * 0.82; cooldownEnemy.y = player.y;
+                cooldownEnemy.angle = Math.PI; cooldownEnemy.crossDirection = 1;
+                cooldownEnemy.steeringMode = 'CROSS'; cooldownEnemy.steeringCooldown = 500;
+                player.vx = 0; player.vy = 3;
+                const blockedCandidate = cooldownEnemy.getSteeringPlan();
+                const committedCrossPlan = cooldownEnemy.getSteeringPlan('CROSS', 1);
+                cooldownEnemy.update(TIME_STEP);
+                const cooldownHoldsCommittedPlan = blockedCandidate.mode === 'REPOSITION' && cooldownEnemy.steeringMode === 'CROSS' && Math.abs(shortestAngleDelta(cooldownEnemy.desiredHeading, committedCrossPlan.desiredHeading)) < 0.02;
+                cooldownEnemy.steeringCooldown = 0;
+                cooldownEnemy.update(TIME_STEP);
+                const cooldownAllowsTransition = cooldownEnemy.steeringMode === 'REPOSITION';
+                cooldownEnemy.steeringMode = 'CROSS'; cooldownEnemy.steeringCooldown = 500;
+                player.vx = 3; player.vy = 0;
+                cooldownEnemy.update(TIME_STEP);
+                const urgentSeparateInterrupts = cooldownEnemy.steeringMode === 'SEPARATE';
+
+                const hardTurnEnemy = new Enemy(ck, 'Japan');
+                hardTurnEnemy.x = player.x + hardTurnEnemy.spec.range * 0.82; hardTurnEnemy.y = player.y;
+                hardTurnEnemy.angle = Math.PI; hardTurnEnemy.crossDirection = 1;
+                hardTurnEnemy.steeringMode = 'CROSS'; hardTurnEnemy.steeringCooldown = 500;
+                hardTurnEnemy.currentSpeed = hardTurnEnemy.spec.speed;
+                player.vx = 0; player.vy = 3;
+                const speedBeforeTurn = hardTurnEnemy.currentSpeed, angleBeforeTurn = hardTurnEnemy.angle;
+                hardTurnEnemy.update(TIME_STEP);
+                const hardTurnVelocityHeading = Math.atan2(hardTurnEnemy.vy, hardTurnEnemy.vx);
+                const hardTurnHeadingDifference = Math.abs(shortestAngleDelta(hardTurnEnemy.angle, hardTurnVelocityHeading));
                 testEnemy.x = player.x + testEnemy.orbitRadius;
                 testEnemy.y = player.y;
                 const firingDistance = Math.hypot(player.x - testEnemy.x, player.y - testEnemy.y);
@@ -1146,17 +1180,26 @@ function startGame() {
                     canFireAtOrbit: firingDistance < testEnemy.spec.range,
                     smoothAcceleration: maxSpeedDelta <= testEnemy.deceleration * 1.01,
                     smoothTurning: maxHeadingDelta <= testEnemy.turnRate * 1.01,
+                    forwardMovementAligned: maxVelocityHullDifference <= 0.02,
                     playerLeadApplied,
                     playerReactionSmooth,
                     stationaryCrosses: stationaryPlan.mode === 'CROSS',
                     reactsToLateralPlayerMovement: crossingPlan.mode === 'REPOSITION' && Math.abs(shortestAngleDelta(stationaryPlan.desiredHeading, crossingPlan.desiredHeading)) > 0.15,
                     movesToInterceptWhenPlayerRetreats: awayPlan.mode === 'APPROACH',
                     separatesWhenPlayerCloses: closingPlan.mode === 'SEPARATE',
+                    cooldownHoldsCommittedPlan,
+                    cooldownAllowsTransition,
+                    urgentSeparateInterrupts,
+                    hardTurnIsRateLimited: Math.abs(shortestAngleDelta(angleBeforeTurn, hardTurnEnemy.angle)) <= hardTurnEnemy.turnRate * 1.01,
+                    hardTurnSlowsDown: hardTurnEnemy.currentSpeed < speedBeforeTurn,
+                    hardTurnRemainsForward: hardTurnEnemy.currentSpeed > 0.25 && hardTurnHeadingDifference <= 0.02,
                     displacement: simulatedDisplacement,
                     settledDistance: secondDistance,
                     settledOrbitRadius,
                     orbitRadius: testEnemy.orbitRadius,
-                    weaponRange: testEnemy.spec.range
+                    weaponRange: testEnemy.spec.range,
+                    maxVelocityHullDifference,
+                    hardTurnHeadingDifference
                 };
                 player.vx = originalPlayerVelocity.vx; player.vy = originalPlayerVelocity.vy;
                 islands = originalIslands;

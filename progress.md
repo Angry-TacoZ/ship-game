@@ -48,3 +48,8 @@ Original prompt: Recover the playable browser naval game and continue its develo
 - Replaced timer-driven orbit reversal with tactical APPROACH, CROSS, REPOSITION, SEPARATE, and CLEAR steering modes.
 - Mode selection now follows range, closing/retreat rate, lateral player movement, nearby islands, and enemy congestion; a short cooldown only prevents rapid mode thrashing.
 - Orbit verification now proves distinct decisions for stationary, lateral-moving, retreating, and rapidly closing players, in addition to smooth movement and firing-range checks.
+
+## Committed enemy steering
+
+- Candidate tactical plans now remain candidates until the steering cooldown permits committing them; active movement uses only the committed mode and crossing side.
+- Added regression coverage for forward hull/velocity alignment, hard-turn braking, cooldown-held CROSS behavior, delayed REPOSITION, and urgent SEPARATE interruption.
