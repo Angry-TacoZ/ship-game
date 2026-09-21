@@ -165,6 +165,34 @@ async function verifyWaveProgression(browser) {
   await page.close();
 }
 
+async function verifyWave5LevelUp(browser) {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  page.on("pageerror", (error) => { throw error; });
+  await page.goto(`${baseUrl}/?verify-wave5-levelup`, { waitUntil: "networkidle" });
+  await page.getByText("Click to Engage", { exact: true }).click();
+  await page.getByRole("button", { name: "Skirmish", exact: true }).click();
+  await page.getByRole("button", { name: /US NAVY/ }).click();
+  await page.getByText("BATTLESHIP", { exact: true }).waitFor();
+  const result = await page.evaluate(() => window.__verifyWave5LevelUp?.());
+  if (
+    !result ||
+    result.before.wave !== 5 ||
+    result.before.gameState !== "UPGRADING" ||
+    !result.before.menuVisible ||
+    result.afterFirstClick.wave !== 5 ||
+    result.afterFirstClick.gameState !== "PLAYING" ||
+    result.afterFirstClick.menuVisible ||
+    result.afterFirstClick.damageMult !== 1.2 ||
+    result.afterSecondClick.damageMult !== result.afterFirstClick.damageMult ||
+    result.afterSecondClick.gameState !== "PLAYING" ||
+    result.afterSecondClick.menuVisible
+  ) {
+    throw new Error(`Wave 5 level-up verification failed: ${JSON.stringify(result)}`);
+  }
+  await page.screenshot({ path: `${outputDirectory}/wave5-levelup-fixed.png`, fullPage: true });
+  await page.close();
+}
+
 async function verifyTouch(browser) {
   const context = await browser.newContext({ ...devices["iPhone 13"] });
   const page = await context.newPage();
@@ -193,6 +221,7 @@ try {
     await verifySecondaryArcs(browser);
     await verifyAnimationLoop(browser);
     await verifyWaveProgression(browser);
+    await verifyWave5LevelUp(browser);
     await verifyTouch(browser);
   } finally {
     await browser.close();
