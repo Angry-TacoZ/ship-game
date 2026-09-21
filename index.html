@@ -781,46 +781,83 @@ class Enemy {
         this.radius = this.spec.radius; this.timer = Math.random()*2000;
         const a = Math.random()*Math.PI*2; this.x = player.x + Math.cos(a)*4500; this.y = player.y + Math.sin(a)*4500;
         this.angle = Math.atan2(player.y - this.y, player.x - this.x); this.turretAngle = this.angle;
-        this.orbitDirection = Math.random() < 0.5 ? -1 : 1;
+        this.crossDirection = Math.random() < 0.5 ? -1 : 1;
         this.orbitRadius = getEnemyOrbitRadius(this.spec);
-        this.orbitShiftTimer = 2600 + Math.random() * 2200;
-        this.orbitShiftCount = 0;
+        this.steeringMode = 'APPROACH'; this.steeringCooldown = 0;
         this.vx = 0; this.vy = 0; this.currentSpeed = 0;
         this.turnRate = ck === 'PT_BOAT' ? 0.02 : 0.011;
         this.acceleration = this.spec.speed * 0.035;
         this.deceleration = this.spec.speed * 0.055;
     }
+    getSteeringPlan() {
+        const directX = player.x - this.x, directY = player.y - this.y;
+        const directDistance = Math.hypot(directX, directY) || 1;
+        const inwardX = directX / directDistance, inwardY = directY / directDistance;
+        const leadFrames = Math.min(72, 24 + directDistance / Math.max(this.spec.speed, 1) * 0.18);
+        const targetX = player.x + player.vx * leadFrames;
+        const targetY = player.y + player.vy * leadFrames;
+        const predictedX = targetX - this.x, predictedY = targetY - this.y;
+        const predictedDistance = Math.hypot(predictedX, predictedY) || 1;
+        const predictedInwardX = predictedX / predictedDistance, predictedInwardY = predictedY / predictedDistance;
+        const lateralPlayerSpeed = -inwardY * player.vx + inwardX * player.vy;
+        const closingSpeed = (player.vx * (this.x - player.x) + player.vy * (this.y - player.y)) / directDistance;
+        const nearbyIsland = islands.find(island => {
+            const dx = this.x - island.x, dy = this.y - island.y;
+            const angle = Math.atan2(dy, dx);
+            return Math.hypot(dx, dy) < outerIslandShorelineRadius(island, angle) + shipIslandClearance(this) + 150;
+        });
+        const crowded = enemies.some(enemy => enemy !== this && Math.hypot(enemy.x - this.x, enemy.y - this.y) < this.radius + enemy.radius + 120);
+        let mode = 'CROSS';
+        if (nearbyIsland || crowded) mode = 'CLEAR';
+        else if (directDistance < this.spec.range * 0.45 || (closingSpeed > 0.75 && directDistance < this.spec.range * 0.95)) mode = 'SEPARATE';
+        else if (directDistance > this.spec.range * 0.88 || closingSpeed < -0.7) mode = 'APPROACH';
+        else if (Math.hypot(player.vx, player.vy) > 0.6 && Math.abs(lateralPlayerSpeed) > 0.35) mode = 'REPOSITION';
+
+        if ((mode === 'CROSS' || mode === 'REPOSITION') && Math.abs(lateralPlayerSpeed) > 0.1) this.crossDirection = Math.sign(lateralPlayerSpeed);
+        const tangentX = -predictedInwardY * this.crossDirection;
+        const tangentY = predictedInwardX * this.crossDirection;
+        const radialStrength = Math.max(-1, Math.min(1, (predictedDistance - this.orbitRadius) / 260));
+        let steerX = predictedInwardX, steerY = predictedInwardY, speedMultiplier = 1;
+        if (mode === 'CROSS') {
+            steerX = tangentX * 0.9 + predictedInwardX * radialStrength * 0.32;
+            steerY = tangentY * 0.9 + predictedInwardY * radialStrength * 0.32;
+            speedMultiplier = 0.86;
+        } else if (mode === 'REPOSITION') {
+            steerX = predictedInwardX * 0.62 + tangentX * 0.82;
+            steerY = predictedInwardY * 0.62 + tangentY * 0.82;
+            speedMultiplier = 0.92;
+        } else if (mode === 'SEPARATE') {
+            steerX = -predictedInwardX + tangentX * 0.55;
+            steerY = -predictedInwardY + tangentY * 0.55;
+            speedMultiplier = 0.78;
+        } else if (mode === 'CLEAR') {
+            const clearX = nearbyIsland ? this.x - nearbyIsland.x : -predictedInwardX;
+            const clearY = nearbyIsland ? this.y - nearbyIsland.y : -predictedInwardY;
+            const clearLength = Math.hypot(clearX, clearY) || 1;
+            steerX = clearX / clearLength + tangentX * 0.4;
+            steerY = clearY / clearLength + tangentY * 0.4;
+            speedMultiplier = 0.7;
+        }
+        return { mode, desiredHeading: Math.atan2(steerY, steerX), targetX, targetY, speedMultiplier };
+    }
     update(dt) {
         const ts = dt/16.6;
-        const directDistance = Math.hypot(player.x - this.x, player.y - this.y);
-        const leadFrames = Math.min(72, 24 + directDistance / Math.max(this.spec.speed, 1) * 0.18);
-        const steeringTargetX = player.x + player.vx * leadFrames;
-        const steeringTargetY = player.y + player.vy * leadFrames;
-        this.steeringTargetX = steeringTargetX; this.steeringTargetY = steeringTargetY;
-        const dist = Math.hypot(steeringTargetX - this.x, steeringTargetY - this.y);
+        const plan = this.getSteeringPlan();
+        this.steeringCooldown -= dt;
+        const urgentMode = plan.mode === 'CLEAR' || plan.mode === 'SEPARATE';
+        if (plan.mode !== this.steeringMode && (urgentMode || this.steeringCooldown <= 0)) {
+            this.steeringMode = plan.mode;
+            this.steeringCooldown = 350;
+        }
+        this.desiredHeading = plan.desiredHeading;
+        this.steeringTargetX = plan.targetX; this.steeringTargetY = plan.targetY;
         const targetAngle = Math.atan2(player.y - this.y, player.x - this.x);
         const turretError = shortestAngleDelta(this.turretAngle, targetAngle);
         this.turretAngle += Math.sign(turretError) * Math.min(Math.abs(turretError), 0.02 * ts);
-        this.orbitShiftTimer -= dt;
-        if (this.orbitShiftTimer <= 0) {
-            this.orbitDirection *= -1;
-            this.orbitRadius = getEnemyOrbitRadius(this.spec);
-            this.orbitShiftTimer = 2600 + Math.random() * 2200;
-            this.orbitShiftCount++;
-        }
-        const radial = dist - this.orbitRadius;
-        const radialStrength = Math.max(-1, Math.min(1, radial / 260));
-        const inwardX = (steeringTargetX - this.x) / Math.max(dist, 1);
-        const inwardY = (steeringTargetY - this.y) / Math.max(dist, 1);
-        const tangentX = -inwardY * this.orbitDirection;
-        const tangentY = inwardX * this.orbitDirection;
-        const moveX = inwardX * radialStrength + tangentX * 0.92;
-        const moveY = inwardY * radialStrength + tangentY * 0.92;
-        const desiredHeading = Math.atan2(moveY, moveX);
-        const headingError = shortestAngleDelta(this.angle, desiredHeading);
+        const headingError = shortestAngleDelta(this.angle, plan.desiredHeading);
         this.angle += Math.sign(headingError) * Math.min(Math.abs(headingError), this.turnRate * ts);
         const turnSlowdown = Math.max(0.4, 1 - Math.abs(headingError) / Math.PI * 0.6);
-        const desiredSpeed = this.spec.speed * turnSlowdown;
+        const desiredSpeed = this.spec.speed * plan.speedMultiplier * turnSlowdown;
         const speedRate = desiredSpeed > this.currentSpeed ? this.acceleration : this.deceleration;
         this.currentSpeed = moveTowards(this.currentSpeed, desiredSpeed, speedRate * ts);
         this.vx = Math.cos(this.angle) * this.currentSpeed;
@@ -1068,7 +1105,7 @@ function startGame() {
                 testEnemy.x = player.x + startDistance; testEnemy.y = player.y;
                 testEnemy.angle = Math.PI; testEnemy.turretAngle = Math.PI;
                 testEnemy.orbitRadius = getEnemyOrbitRadius(testEnemy.spec, 0.5);
-                testEnemy.orbitDirection = 1; testEnemy.orbitShiftTimer = Infinity;
+                testEnemy.crossDirection = 1;
                 const start = { x: testEnemy.x, y: testEnemy.y };
                 const startDistanceFromPlayer = Math.hypot(player.x - testEnemy.x, player.y - testEnemy.y);
                 let maxSpeedDelta = 0, maxHeadingDelta = 0;
@@ -1080,31 +1117,42 @@ function startGame() {
                 }
                 const secondDistance = Math.hypot(player.x - testEnemy.x, player.y - testEnemy.y);
                 const settledOrbitRadius = testEnemy.orbitRadius;
-                const firstPosition = { x: testEnemy.x, y: testEnemy.y };
+                const simulatedDisplacement = Math.hypot(testEnemy.x - start.x, testEnemy.y - start.y);
                 player.vx = 3; player.vy = -2;
                 const previousAngle = testEnemy.angle;
                 testEnemy.update(TIME_STEP);
                 const playerLeadApplied = Math.hypot(testEnemy.steeringTargetX - player.x, testEnemy.steeringTargetY - player.y) > 0;
                 const playerReactionSmooth = Math.abs(shortestAngleDelta(previousAngle, testEnemy.angle)) <= testEnemy.turnRate * 1.01;
-                testEnemy.orbitShiftTimer = 0;
-                const angleBeforeShift = testEnemy.angle;
-                testEnemy.update(TIME_STEP);
+
+                const decisionEnemy = new Enemy(ck, 'Japan');
+                decisionEnemy.x = player.x + decisionEnemy.spec.range * 0.82; decisionEnemy.y = player.y;
+                decisionEnemy.angle = Math.PI; decisionEnemy.crossDirection = 1;
+                player.vx = 0; player.vy = 0;
+                const stationaryPlan = decisionEnemy.getSteeringPlan();
+                decisionEnemy.crossDirection = 1; player.vx = 0; player.vy = 3;
+                const crossingPlan = decisionEnemy.getSteeringPlan();
+                decisionEnemy.crossDirection = 1; player.vx = -3; player.vy = 0;
+                const awayPlan = decisionEnemy.getSteeringPlan();
+                decisionEnemy.crossDirection = 1; player.vx = 3; player.vy = 0;
+                const closingPlan = decisionEnemy.getSteeringPlan();
                 testEnemy.x = player.x + testEnemy.orbitRadius;
                 testEnemy.y = player.y;
                 const firingDistance = Math.hypot(player.x - testEnemy.x, player.y - testEnemy.y);
                 const result = {
-                    moved: Math.hypot(testEnemy.x - firstPosition.x, testEnemy.y - firstPosition.y) > 0,
+                    moved: simulatedDisplacement > 0,
                     approachedCombatRange: secondDistance < startDistanceFromPlayer,
                     staysNearCombatRange: Math.abs(secondDistance - settledOrbitRadius) < 260,
-                    shiftedOrbit: testEnemy.orbitShiftCount === 1,
                     orbitInsideWeaponRange: testEnemy.orbitRadius < testEnemy.spec.range,
                     canFireAtOrbit: firingDistance < testEnemy.spec.range,
                     smoothAcceleration: maxSpeedDelta <= testEnemy.deceleration * 1.01,
                     smoothTurning: maxHeadingDelta <= testEnemy.turnRate * 1.01,
-                    shiftTurnsSmoothly: Math.abs(shortestAngleDelta(angleBeforeShift, testEnemy.angle)) <= testEnemy.turnRate * 1.01,
                     playerLeadApplied,
                     playerReactionSmooth,
-                    displacement: Math.hypot(testEnemy.x - start.x, testEnemy.y - start.y),
+                    stationaryCrosses: stationaryPlan.mode === 'CROSS',
+                    reactsToLateralPlayerMovement: crossingPlan.mode === 'REPOSITION' && Math.abs(shortestAngleDelta(stationaryPlan.desiredHeading, crossingPlan.desiredHeading)) > 0.15,
+                    movesToInterceptWhenPlayerRetreats: awayPlan.mode === 'APPROACH',
+                    separatesWhenPlayerCloses: closingPlan.mode === 'SEPARATE',
+                    displacement: simulatedDisplacement,
                     settledDistance: secondDistance,
                     settledOrbitRadius,
                     orbitRadius: testEnemy.orbitRadius,

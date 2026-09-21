@@ -42,3 +42,9 @@ Original prompt: Recover the playable browser naval game and continue its develo
 - Replaced direct full-speed enemy position stepping with hull heading, velocity, acceleration, and braking state.
 - Enemy hulls now turn at class-specific rates, slow through hard turns, and steer toward a short predicted player position.
 - Extended `?verify-enemy-orbit` coverage to require bounded speed/heading changes, smooth orbit shifts, and smooth response to player movement for both enemy types.
+
+## Reactive combat steering
+
+- Replaced timer-driven orbit reversal with tactical APPROACH, CROSS, REPOSITION, SEPARATE, and CLEAR steering modes.
+- Mode selection now follows range, closing/retreat rate, lateral player movement, nearby islands, and enemy congestion; a short cooldown only prevents rapid mode thrashing.
+- Orbit verification now proves distinct decisions for stationary, lateral-moving, retreating, and rapidly closing players, in addition to smooth movement and firing-range checks.
