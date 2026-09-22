@@ -2,6 +2,8 @@ Original prompt: Recover the playable browser naval game and continue its develo
 
 ## AI Duel Lab experiment
 
+- Revision of existing draft PR #10 (no merge/deploy/paid calls): eight-sample noisy observation tracks, observation-bound policy/director/helm, named independent RNG purposes and four role/side conditions, larger arena/range-sensitive spread, application-versus-persistent constraints, joint 108-plan Choice, and track/role/scenario observer controls. AP/HE competence thresholds retained. 41 Node tests and full original/duel browser verifier pass. Expanded controls: 32 seeds × 3 geometries × 4 conditions = 384, with 192 repeat/reverse checks; all 96 groups pass. Detailed current evidence and caveats are in AI-DUEL-EXPERIMENT.md. Earlier bullets below describe the original pre-revision baseline.
+
 - Request: compare Jev tactical decisions with deterministic rules under real decision latency, using identical ships and observable outcomes. Source baseline is main `d73662a`; experimental branch is `codex/ai-duel-lab`.
 - Architecture inspected: legacy committed enemy steering, fixed tick, turrets, projectile radius tests and verifier routes. New duel uses separate ES modules; legacy page only gains a mode link.
 - Common combat and policy checks pass: swept oriented hull hits, AP/HE aspect rules, actual turret arcs, module impairment, seeded repeatability, five fixed mirrored seeds and reversed update order.
