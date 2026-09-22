@@ -559,9 +559,11 @@ function updateVolume(type, val) {
 }
 
 const ISLAND_LAYERS = [
-    { r: 1.0, color: '#eab308', noise: 0.15 },
-    { r: 0.85, color: '#22c55e', noise: 0.1 },
-    { r: 0.65, color: '#15803d', noise: 0.08 }
+    { r: 1.0, color: '#b77b38', light: '#dba95b', shadow: '#75462c', noise: 0.15 },
+    { r: 0.88, color: '#e7cc86', light: '#f7e5ad', shadow: '#b28a50', noise: 0.11 },
+    { r: 0.75, color: '#4f9d57', light: '#79bd6c', shadow: '#2d6b43', noise: 0.1 },
+    { r: 0.58, color: '#347b49', light: '#55a05a', shadow: '#1e513b', noise: 0.08 },
+    { r: 0.4, color: '#24543d', light: '#3e7b4d', shadow: '#15382d', noise: 0.06 }
 ];
 
 function islandLayerRadius(isl, angle, layer) {
@@ -581,6 +583,25 @@ function shipIslandClearance(entity) {
     const hull = getHullDimensions(entity.radius, entity.nation);
     const forwardExtent = hull.length * (entity.nation === 'Germany' ? 1.2 : 1);
     return Math.hypot(forwardExtent, hull.width);
+}
+
+function traceIslandLayer(context, isl, radius, center, layer) {
+    context.beginPath();
+    for (let a = 0; a <= Math.PI * 2 + 0.1; a += Math.PI / 64) {
+        const r = islandLayerRadius(isl, a, layer);
+        const px = center + Math.cos(a) * r;
+        const py = center + Math.sin(a) * r;
+        if (a === 0) context.moveTo(px, py); else context.lineTo(px, py);
+    }
+    context.closePath();
+}
+
+function islandLayerGradient(context, center, radius, layer) {
+    const gradient = context.createLinearGradient(center - radius, center - radius, center + radius, center + radius);
+    gradient.addColorStop(0, layer.light);
+    gradient.addColorStop(0.52, layer.color);
+    gradient.addColorStop(1, layer.shadow);
+    return gradient;
 }
 
 function resolveIslandCollision(entity) {
@@ -911,11 +932,19 @@ function initIslands() {
     islands = [];
     for(let i=0; i<15; i++) {
         const radius = 600 + Math.random() * 500;
-        const isl = { x: (Math.random()-0.5)*18000, y: (Math.random()-0.5)*18000, radius: radius, seed1: Math.random() * 10, seed2: Math.random() * 10, trees: [] };
-        const treeCount = Math.floor(radius / 8);
+        const isl = { x: (Math.random()-0.5)*18000, y: (Math.random()-0.5)*18000, radius: radius, seed1: Math.random() * 10, seed2: Math.random() * 10, trees: [], rocks: [], hills: [] };
+        const treeCount = Math.floor(radius / 12);
         for(let t=0; t<treeCount; t++) {
-            const tr = Math.random() * (radius * 0.7), ta = Math.random() * Math.PI * 2;
+            const tr = Math.random() * (radius * 0.62), ta = Math.random() * Math.PI * 2;
             isl.trees.push({ x: Math.cos(ta)*tr, y: Math.sin(ta)*tr, size: 18+Math.random()*25, color: ['#14532d', '#166534', '#15803d'][Math.floor(Math.random()*3)] });
+        }
+        for (let h = 0; h < 5; h++) {
+            const hr = radius * (0.12 + Math.random() * 0.3), ha = Math.random() * Math.PI * 2;
+            isl.hills.push({ x: Math.cos(ha) * hr, y: Math.sin(ha) * hr, width: 70 + Math.random() * 95, height: 45 + Math.random() * 65, angle: Math.random() * Math.PI });
+        }
+        for (let r = 0; r < Math.floor(radius / 70); r++) {
+            const rr = radius * (0.2 + Math.random() * 0.5), ra = Math.random() * Math.PI * 2;
+            isl.rocks.push({ x: Math.cos(ra) * rr, y: Math.sin(ra) * rr, size: 9 + Math.random() * 15, angle: Math.random() * Math.PI });
         }
         isl.buffer = document.createElement('canvas'); const bSize = radius * 2.5;
         isl.buffer.width = bSize; isl.buffer.height = bSize;
@@ -925,18 +954,70 @@ function initIslands() {
 }
 
 function renderIslandToBuffer(bCtx, isl, radius, center) {
-    ISLAND_LAYERS.forEach(layer => {
-        bCtx.beginPath(); const lRadius = radius * layer.r;
-        for (let a = 0; a <= Math.PI * 2 + 0.1; a += Math.PI / 64) {
-            const r = islandLayerRadius(isl, a, layer); const px = center + Math.cos(a)*r, py = center + Math.sin(a)*r;
-            if (a === 0) bCtx.moveTo(px, py); else bCtx.lineTo(px, py);
-        }
-        bCtx.closePath(); bCtx.fillStyle = layer.color; bCtx.fill(); bCtx.strokeStyle = 'rgba(0,0,0,0.1)'; bCtx.lineWidth = 4; bCtx.stroke();
+    bCtx.save();
+    bCtx.translate(20, 28);
+    traceIslandLayer(bCtx, isl, radius, center, ISLAND_LAYERS[0]);
+    bCtx.fillStyle = 'rgba(3, 15, 22, 0.38)';
+    bCtx.fill();
+    bCtx.restore();
+
+    ISLAND_LAYERS.forEach((layer, index) => {
+        traceIslandLayer(bCtx, isl, radius, center, layer);
+        bCtx.fillStyle = islandLayerGradient(bCtx, center, radius, layer);
+        bCtx.fill();
+        bCtx.strokeStyle = index === 0 ? 'rgba(70, 38, 24, 0.85)' : 'rgba(11, 41, 31, 0.58)';
+        bCtx.lineWidth = index < 2 ? 6 : 8;
+        bCtx.stroke();
     });
+
+    bCtx.save();
+    bCtx.globalAlpha = 0.48;
+    bCtx.strokeStyle = '#173d32';
+    bCtx.lineWidth = 7;
+    [0.49, 0.32].forEach(scale => {
+        const contour = { ...ISLAND_LAYERS[ISLAND_LAYERS.length - 1], r: scale, noise: 0.045 };
+        traceIslandLayer(bCtx, isl, radius, center, contour);
+        bCtx.stroke();
+    });
+    bCtx.globalAlpha = 0.32;
+    bCtx.strokeStyle = '#b8d77b';
+    bCtx.lineWidth = 3;
+    const highlight = { ...ISLAND_LAYERS[2], r: 0.78, noise: 0.06 };
+    traceIslandLayer(bCtx, isl, radius, center, highlight);
+    bCtx.stroke();
+    bCtx.restore();
+
+    isl.hills.forEach(hill => {
+        bCtx.save();
+        bCtx.translate(center + hill.x + 10, center + hill.y + 14);
+        bCtx.rotate(hill.angle);
+        bCtx.fillStyle = 'rgba(12, 38, 29, 0.28)';
+        bCtx.beginPath(); bCtx.ellipse(0, 0, hill.width * 1.08, hill.height * 0.92, 0, 0, Math.PI * 2); bCtx.fill();
+        bCtx.translate(-10, -14);
+        bCtx.fillStyle = 'rgba(116, 180, 91, 0.22)';
+        bCtx.beginPath(); bCtx.ellipse(0, 0, hill.width, hill.height, 0, 0, Math.PI * 2); bCtx.fill();
+        bCtx.restore();
+    });
+
+    isl.rocks.forEach(rock => {
+        bCtx.save();
+        bCtx.translate(center + rock.x + 7, center + rock.y + 9);
+        bCtx.rotate(rock.angle);
+        bCtx.fillStyle = 'rgba(8, 25, 25, 0.35)';
+        bCtx.beginPath(); bCtx.ellipse(0, 0, rock.size * 1.2, rock.size * 0.72, 0, 0, Math.PI * 2); bCtx.fill();
+        bCtx.translate(-7, -9);
+        bCtx.fillStyle = '#53685b';
+        bCtx.beginPath(); bCtx.moveTo(-rock.size, rock.size * 0.35); bCtx.lineTo(-rock.size * 0.55, -rock.size * 0.7); bCtx.lineTo(rock.size * 0.25, -rock.size); bCtx.lineTo(rock.size, rock.size * 0.15); bCtx.lineTo(rock.size * 0.45, rock.size * 0.75); bCtx.closePath(); bCtx.fill();
+        bCtx.fillStyle = 'rgba(222, 237, 190, 0.4)';
+        bCtx.beginPath(); bCtx.moveTo(-rock.size * 0.5, -rock.size * 0.5); bCtx.lineTo(rock.size * 0.25, -rock.size); bCtx.lineTo(rock.size * 0.05, -rock.size * 0.3); bCtx.closePath(); bCtx.fill();
+        bCtx.restore();
+    });
+
     isl.trees.forEach(tree => {
         bCtx.fillStyle = 'rgba(0,0,0,0.25)'; bCtx.beginPath(); bCtx.arc(center + tree.x + 6, center + tree.y + 6, tree.size, 0, Math.PI * 2); bCtx.fill();
         bCtx.fillStyle = tree.color; bCtx.beginPath(); bCtx.arc(center + tree.x, center + tree.y, tree.size, 0, Math.PI * 2); bCtx.fill();
-        bCtx.fillStyle = 'rgba(255,255,255,0.15)'; bCtx.beginPath(); bCtx.arc(center + tree.x - tree.size*0.3, center + tree.y - tree.size*0.3, tree.size*0.4, 0, Math.PI * 2); bCtx.fill();
+        bCtx.fillStyle = 'rgba(255,255,255,0.2)'; bCtx.beginPath(); bCtx.arc(center + tree.x - tree.size*0.3, center + tree.y - tree.size*0.3, tree.size*0.42, 0, Math.PI * 2); bCtx.fill();
+        bCtx.fillStyle = 'rgba(5, 35, 27, 0.25)'; bCtx.beginPath(); bCtx.arc(center + tree.x + tree.size*0.25, center + tree.y + tree.size*0.3, tree.size*0.72, 0, Math.PI * 2); bCtx.fill();
     });
 }
 
@@ -1107,6 +1188,34 @@ function startGame() {
                 playerX: testPlayer.x,
                 enemyX: enemy.x
             };
+        };
+    }
+    if (new URLSearchParams(window.location.search).has('verify-island-detail')) {
+        window.__verifyIslandDetail = () => {
+            const fixture = { x: 0, y: 0, radius: 500, seed1: 1.5, seed2: 2.2, trees: [], rocks: [], hills: [] };
+            for (let i = 0; i < 34; i++) {
+                const angle = i * 0.91;
+                const distance = 85 + (i % 7) * 34;
+                fixture.trees.push({ x: Math.cos(angle) * distance, y: Math.sin(angle) * distance, size: 16 + (i % 4) * 4, color: ['#14532d', '#166534', '#15803d'][i % 3] });
+            }
+            for (let i = 0; i < 7; i++) {
+                const angle = i * 1.37;
+                const distance = 110 + (i % 3) * 75;
+                fixture.hills.push({ x: Math.cos(angle) * distance, y: Math.sin(angle) * distance, width: 85 + (i % 3) * 22, height: 54 + (i % 2) * 20, angle: angle + 0.4 });
+                fixture.rocks.push({ x: Math.cos(angle + 0.5) * (distance + 55), y: Math.sin(angle + 0.5) * (distance + 55), size: 11 + (i % 4) * 3, angle: angle });
+            }
+            const originalIslands = islands;
+            islands = [fixture];
+            const bufferSize = fixture.radius * 2.5;
+            fixture.buffer = document.createElement('canvas');
+            fixture.buffer.width = bufferSize;
+            fixture.buffer.height = bufferSize;
+            renderIslandToBuffer(fixture.buffer.getContext('2d'), fixture, fixture.radius, bufferSize / 2);
+            player.x = -680; player.y = 0; player.vx = 0; player.vy = 0;
+            enemies = enemies.slice(0, 1);
+            enemies.forEach(enemy => { enemy.x = 3000; enemy.y = 3000; });
+            gameState = 'PAUSED';
+            return { layerCount: ISLAND_LAYERS.length, hillCount: fixture.hills.length, rockCount: fixture.rocks.length, treeCount: fixture.trees.length, shorelineRadius: outerIslandShorelineRadius(fixture, 0), originalIslandCount: originalIslands.length };
         };
     }
     if (new URLSearchParams(window.location.search).has('verify-enemy-orbit')) {

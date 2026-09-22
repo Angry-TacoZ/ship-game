@@ -83,6 +83,23 @@ async function verifyIslandCollision(browser) {
   await page.close();
 }
 
+async function verifyIslandDetail(browser) {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  page.on("pageerror", (error) => { throw error; });
+  await page.goto(`${baseUrl}/?verify-island-detail`, { waitUntil: "networkidle" });
+  await page.getByText("Click to Engage", { exact: true }).click();
+  await page.getByRole("button", { name: "Skirmish", exact: true }).click();
+  await page.getByRole("button", { name: /US NAVY/ }).click();
+  await page.getByText("BATTLESHIP", { exact: true }).waitFor();
+  const result = await page.evaluate(() => window.__verifyIslandDetail?.());
+  if (!result || result.layerCount < 5 || result.hillCount < 1 || result.rockCount < 1 || result.treeCount < 1 || result.shorelineRadius <= 0) {
+    throw new Error(`Island detail verification failed: ${JSON.stringify(result)}`);
+  }
+  await page.waitForTimeout(250);
+  await page.screenshot({ path: `${outputDirectory}/island-detail.png`, fullPage: true });
+  await page.close();
+}
+
 async function verifyEnemyOrbit(browser) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
   page.on("pageerror", (error) => { throw error; });
@@ -217,6 +234,7 @@ try {
     await verifyDesktop(browser);
     await verifyDefeat(browser);
     await verifyIslandCollision(browser);
+    await verifyIslandDetail(browser);
     await verifyEnemyOrbit(browser);
     await verifySecondaryArcs(browser);
     await verifyAnimationLoop(browser);
