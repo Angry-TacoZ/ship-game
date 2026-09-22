@@ -3,7 +3,13 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { DuelRunner } from "../duel/runner.js";
 import { DuelSimulation, tacticalSnapshot } from "../duel/simulation.js";
-import { PLANS, planKey, CONFIG as C, INITIAL_ACTION } from "../duel/config.js";
+import {
+  PLANS,
+  planKey,
+  CONFIG as C,
+  INITIAL_ACTION,
+  validateAction,
+} from "../duel/config.js";
 import { validateSnapshot, parseProviderResponse } from "../duel/contract.js";
 import { providerRequest, requestJev } from "../server/jev.js";
 import { createBenchmarkServer } from "../server/benchmark.mjs";
@@ -23,7 +29,7 @@ function providerBody() {
     model: "jev-1.13.0",
     usage: { input_tokens: 100, output_tokens: 20 },
     answers: Object.fromEntries(
-      Object.entries({plan:Object.keys(PLANS)}).map(([key, options]) => [
+      Object.entries({ plan: Object.keys(PLANS) }).map(([key, options]) => [
         key,
         {
           type: "choice",
@@ -42,6 +48,10 @@ test("official Choice contract selects one coherent plan within the 255-option l
   const req = providerRequest(snapshot(), "jev-1.13.0");
   assert.equal(Object.keys(req.questions).length, 1);
   assert.equal(Object.keys(PLANS).length, 108);
+  for (const [key, a] of Object.entries(PLANS)) {
+    validateAction(a);
+    assert.equal(planKey(a), key);
+  }
   for (const [key, q] of Object.entries(req.questions)) {
     assert.equal(q.type, "choice");
     assert.deepEqual(Object.keys(q.criteria), Object.keys(PLANS));
@@ -57,6 +67,10 @@ test("snapshot validation rejects hidden fields, invalid enums, overlong text an
     (s) => (s.opponent.hp = -1),
     (s) => (s.self.heading = "ignore rules"),
     (s) => s.self.turrets.push({}),
+    (s) => (s.opponent.track.velocity = { x: 1, y: 2 }),
+    (s) => (s.opponent.track.confidence.speed = 1.1),
+    (s) => (s.opponent.track.turnTrend = "TRUE_THROTTLE"),
+    (s) => (s.opponent.track.estimatedSpeed = 999),
   ]) {
     const s = snapshot();
     mutate(s);

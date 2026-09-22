@@ -5,7 +5,7 @@ import { DuelShip } from "../duel/simulation.js";
 import { CONFIG as C } from "../duel/config.js";
 import { resolveImpact, turretCanBear, aimSolution } from "../duel/combat.js";
 import { deterministicPolicy } from "../duel/policy.js";
-import { stationaryTrack } from './track-fixture.mjs';
+import { stationaryTrack } from "./track-fixture.mjs";
 
 test("simultaneous lethal shells produce draw regardless of ship order", () => {
   for (const reverse of [false, true]) {

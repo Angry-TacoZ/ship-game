@@ -20,6 +20,7 @@ export class DuelRunner {
     seed = 42,
     swapped = false,
     contenderShip = "bravo",
+    scenario = "HEAD_ON",
     mode = "CONTROL",
     injectedDelayMs = 0,
     decisionIntervalMs = C.decisionIntervalMs,
@@ -42,7 +43,7 @@ export class DuelRunner {
       throw new Error("Invalid runner settings");
     if (mode !== "CONTROL" && typeof requestDecision !== "function")
       throw new Error("Missing decision adapter");
-    this.sim = new DuelSimulation({ seed, swapped, timeLimitMs });
+    this.sim = new DuelSimulation({ seed, swapped, scenario, timeLimitMs });
     this.mode = mode;
     this.contenderShip = contenderShip;
     this.injectedDelayMs = injectedDelayMs;
@@ -60,7 +61,7 @@ export class DuelRunner {
     this.latest = {};
     this.opportunities = { alpha: 0, bravo: 0 };
     this.usedOpportunities = { alpha: 0, bravo: 0 };
-    this.firingTicks = {alpha:0,bravo:0};
+    this.firingTicks = { alpha: 0, bravo: 0 };
     this.opportunityWindows = {};
     this.disposed = false;
   }
@@ -77,9 +78,9 @@ export class DuelRunner {
       simulationTimestampMs: this.sim.timeMs,
       controller: this.controller(id),
       ship: id,
-      startingSide: this.sim.ships.find(s => s.id === id).startingSide,
-      rngRole: this.sim.ships.find(s => s.id === id).rngRole,
-      streamIds: this.sim.ships.find(s => s.id === id).streamIds,
+      startingSide: this.sim.ships.find((s) => s.id === id).startingSide,
+      rngRole: this.sim.ships.find((s) => s.id === id).rngRole,
+      streamIds: this.sim.ships.find((s) => s.id === id).streamIds,
       snapshot,
       requestedAtWallTime: this.wallClock(),
       requestedAtMonotonicMs: this.clock(),
@@ -104,7 +105,9 @@ export class DuelRunner {
       stateAgeAtApplyMs: this.sim.timeMs - event.snapshot.timeMs,
       stateChange: {
         rangeDelta: current.self.range - event.snapshot.self.range,
-        aspectDelta: current.opponent.track.aspectEstimate - event.snapshot.opponent.track.aspectEstimate,
+        aspectDelta:
+          current.opponent.track.aspectEstimate -
+          event.snapshot.opponent.track.aspectEstimate,
         hpDelta: current.self.hp - event.snapshot.self.hp,
         damageTaken: event.snapshot.self.hp - current.self.hp,
         firingOpportunityOpened:
@@ -116,9 +119,14 @@ export class DuelRunner {
       },
       trackAtRequest: structuredClone(event.snapshot.opponent.track),
       trackAtApply: structuredClone(current.opponent.track),
-      requestedTrackAgeAtApplyMs: this.sim.timeMs-event.snapshot.timeMs+event.snapshot.opponent.track.trackAgeMs,
+      requestedTrackAgeAtApplyMs:
+        this.sim.timeMs -
+        event.snapshot.timeMs +
+        event.snapshot.opponent.track.trackAgeMs,
       constraintsAtApply,
-      blockedAtApply: action.fire === 'FIRE' && constraintsAtApply.length === ship.turrets.length,
+      blockedAtApply:
+        action.fire === "FIRE" &&
+        constraintsAtApply.length === ship.turrets.length,
       constraintsEncounteredDuringAction: [],
       firstConstraintTimeMs: constraintsAtApply.length ? this.sim.timeMs : null,
       firedDuringDecisionWindow: false,
@@ -224,7 +232,11 @@ export class DuelRunner {
         return;
       }
       if (this.pending.ready && this.clock() >= this.pending.applyAfter) {
-        this.apply(this.pending.event.ship, this.pending.event, this.pending.ready);
+        this.apply(
+          this.pending.event.ship,
+          this.pending.event,
+          this.pending.ready,
+        );
         this.pending = null;
       }
     }
@@ -237,13 +249,21 @@ export class DuelRunner {
       snapshots.forEach((snapshot, i) => {
         const id = this.sim.ships[i].id;
         if (snapshot.self.firingOpportunity) this.opportunities[id]++;
-        this.opportunityWindows[id] = {observed:snapshot.self.firingOpportunity,used:false};
-        if (id === this.contenderShip && this.mode !== "CONTROL" && this.pending) {
+        this.opportunityWindows[id] = {
+          observed: snapshot.self.firingOpportunity,
+          used: false,
+        };
+        if (
+          id === this.contenderShip &&
+          this.mode !== "CONTROL" &&
+          this.pending
+        ) {
           this.missed++;
           return;
         }
         const event = this.event(id, snapshot);
-        if (id === this.contenderShip && this.mode !== "CONTROL") this.startRequest(event);
+        if (id === this.contenderShip && this.mode !== "CONTROL")
+          this.startRequest(event);
         else {
           const before = this.clock(),
             result = deterministicPolicy(snapshot);
@@ -261,23 +281,43 @@ export class DuelRunner {
       if (event) {
         if (ship.blocked.length) {
           event.firstConstraintTimeMs ??= this.sim.timeMs;
-          for (const blocked of ship.blocked) for(const reason of blocked.reasons) {
-            if(!event.constraintsEncounteredDuringAction.some(c=>c.turret===blocked.turret && c.reason===reason))
-              event.constraintsEncounteredDuringAction.push({turret:blocked.turret,reason,firstTimeMs:this.sim.timeMs});
-          }
+          for (const blocked of ship.blocked)
+            for (const reason of blocked.reasons) {
+              if (
+                !event.constraintsEncounteredDuringAction.some(
+                  (c) => c.turret === blocked.turret && c.reason === reason,
+                )
+              )
+                event.constraintsEncounteredDuringAction.push({
+                  turret: blocked.turret,
+                  reason,
+                  firstTimeMs: this.sim.timeMs,
+                });
+            }
         }
         if (ship.boundaryBlocked) {
           event.boundaryBlocked = true;
           event.firstConstraintTimeMs ??= this.sim.timeMs;
-          if(!event.constraintsEncounteredDuringAction.some(c=>c.reason==='BOUNDARY'))
-            event.constraintsEncounteredDuringAction.push({turret:null,reason:'BOUNDARY',firstTimeMs:this.sim.timeMs});
+          if (
+            !event.constraintsEncounteredDuringAction.some(
+              (c) => c.reason === "BOUNDARY",
+            )
+          )
+            event.constraintsEncounteredDuringAction.push({
+              turret: null,
+              reason: "BOUNDARY",
+              firstTimeMs: this.sim.timeMs,
+            });
         }
         if (ship.lastSalvoMs === this.sim.timeMs) {
           event.firedDuringDecisionWindow = true;
           event.firstFireTimeMs ??= this.sim.timeMs;
           this.firingTicks[ship.id]++;
-          const window=this.opportunityWindows[ship.id];
-          if(window?.observed && !window.used) { this.usedOpportunities[ship.id]++; window.used=true; }
+          const window = this.opportunityWindows[ship.id];
+          if (window?.observed && !window.used) {
+            this.usedOpportunities[ship.id]++;
+            window.used = true;
+          }
         }
       }
     }
@@ -305,6 +345,7 @@ export class DuelRunner {
       mode: this.mode,
       swapped: this.sim.swapped,
       contenderShip: this.contenderShip,
+      scenario: this.sim.scenario,
       configuration: C,
       decisionIntervalMs: this.interval,
       injectedDelayMs: this.injectedDelayMs,
@@ -355,8 +396,21 @@ export class DuelRunner {
         return out;
       }, {}),
       cost: null,
-      trackMetrics: Object.fromEntries(['positionError','velocityError','speedError','headingErrorDegrees','confidence','uncertainty'].map(key =>
-        [key, statistics(this.sim.trackResearch.map(r=>r[key]).filter(Number.isFinite))])),
+      trackMetrics: Object.fromEntries(
+        [
+          "positionError",
+          "velocityError",
+          "speedError",
+          "headingErrorDegrees",
+          "confidence",
+          "uncertainty",
+        ].map((key) => [
+          key,
+          statistics(
+            this.sim.trackResearch.map((r) => r[key]).filter(Number.isFinite),
+          ),
+        ]),
+      ),
       costNote:
         "API contract returns token usage, not a monetary cost. No estimated cost substituted.",
     };

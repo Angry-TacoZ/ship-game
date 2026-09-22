@@ -28,6 +28,7 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run verify
+      - run: npm run verify:controls
       - run: npm run package:static
       - uses: actions/configure-pages@v6
         if: github.event_name != 'pull_request'

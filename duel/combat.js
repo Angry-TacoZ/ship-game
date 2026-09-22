@@ -63,13 +63,23 @@ export function turretCanBear(ship, index, worldAngle) {
 // Physical lateral half-width, converted to an angular offset at launch.
 // Uniform bounded dispersion; no hit/miss roll and no outcome-dependent spread.
 export function dispersionHalfWidth(range) {
-  return C.dispersionBaseHalfWidth + C.dispersionLinear*range + C.dispersionQuadratic*range*range;
+  return (
+    C.dispersionBaseHalfWidth +
+    C.dispersionLinear * range +
+    C.dispersionQuadratic * range * range
+  );
 }
 export function aimSolution(ship, track, index, zone) {
-  if (track?.kind !== 'TARGET_TRACK' || 'vx' in track || 'speed' in track)
-    throw new Error('Gun director requires a TargetTrack, not a physical target');
-  const target = { ...track.position, heading: track.estimatedHeading ?? 0,
-    vx: track.estimatedVelocity.x ?? 0, vy: track.estimatedVelocity.y ?? 0 };
+  if (track?.kind !== "TARGET_TRACK" || "vx" in track || "speed" in track)
+    throw new Error(
+      "Gun director requires a TargetTrack, not a physical target",
+    );
+  const target = {
+    ...track.position,
+    heading: track.estimatedHeading ?? 0,
+    vx: track.estimatedVelocity.x ?? 0,
+    vy: track.estimatedVelocity.y ?? 0,
+  };
   const origin = worldPoint(ship, C.turretOffsets[index]);
   const aim = worldPoint(
     target,
@@ -91,14 +101,20 @@ export function aimSolution(ship, track, index, zone) {
     : Math.sqrt(c) / C.shellSpeed;
   return {
     origin,
-    usable: track.quality !== 'LOST' && track.estimatedSpeed !== null,
+    usable: track.quality !== "LOST" && track.estimatedSpeed !== null,
     flightTimeSeconds: time,
     angle: Math.atan2(dy + target.vy * time, dx + target.vx * time),
     range: Math.sqrt(c),
   };
 }
 
-export function resolveImpact(shell, target, hit, random, moduleRandom = random) {
+export function resolveImpact(
+  shell,
+  target,
+  hit,
+  random,
+  moduleRandom = random,
+) {
   const targetAspect = aspect(shell.angle, target.heading),
     incidence = 90 - targetAspect;
   let outcome = "PENETRATION",
@@ -145,6 +161,6 @@ export function resolveImpact(shell, target, hit, random, moduleRandom = random)
     point: hit.point,
     launchedAtMs: shell.launchedAtMs ?? null,
     launchTrack: shell.launchTrack ?? null,
-    analysisLabel: 'GROUND TRUTH - ANALYSIS ONLY',
+    analysisLabel: "GROUND TRUTH - ANALYSIS ONLY",
   };
 }

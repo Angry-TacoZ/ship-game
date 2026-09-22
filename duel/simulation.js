@@ -17,13 +17,13 @@ import {
   resolveImpact,
   dispersionHalfWidth,
 } from "./combat.js";
-import { TargetTracker, observePose } from './tracking.js';
+import { TargetTracker, observePose } from "./tracking.js";
 
 export class DuelShip {
   constructor(id, side, seed) {
     this.id = id;
     this.startingSide = side;
-    this.x = C.width/2 + (side === 'A' ? -1 : 1)*C.startingSeparation/2;
+    this.x = C.width / 2 + ((side === "A" ? -1 : 1) * C.startingSeparation) / 2;
     this.y = C.height / 2;
     this.heading = side === "A" ? 0.15 : Math.PI + 0.15;
     this.speed = 0;
@@ -41,8 +41,18 @@ export class DuelShip {
     this.holdHeading = this.heading;
     this.lastSalvoMs = null;
     this.rngRole = id === "alpha" ? "R0" : "R1";
-    this.streamIds = Object.fromEntries(["dispersion", "armor", "modules", "observation"].map(p => [p, `${this.rngRole}:${p}:${streamSeed(seed, this.rngRole, p)}`]));
-    this.streams = Object.fromEntries(["dispersion", "armor", "modules", "observation"].map(p => [p, rng(streamSeed(seed, this.rngRole, p))]));
+    this.streamIds = Object.fromEntries(
+      ["dispersion", "armor", "modules", "observation"].map((p) => [
+        p,
+        `${this.rngRole}:${p}:${streamSeed(seed, this.rngRole, p)}`,
+      ]),
+    );
+    this.streams = Object.fromEntries(
+      ["dispersion", "armor", "modules", "observation"].map((p) => [
+        p,
+        rng(streamSeed(seed, this.rngRole, p)),
+      ]),
+    );
     this.stats = {
       damageDealt: 0,
       damageReceived: 0,
@@ -156,7 +166,8 @@ export class DuelShip {
       turret.reload = C.reloadMs;
       this.lastSalvoMs = timeMs;
       for (let b = 0; b < C.barrels; b++) {
-        const lateral = (2*this.streams.dispersion()-1)*dispersionHalfWidth(aim.range);
+        const lateral =
+          (2 * this.streams.dispersion() - 1) * dispersionHalfWidth(aim.range);
         const angle = aim.angle + Math.atan2(lateral, Math.max(1, aim.range));
         shells.push({
           ...aim.origin,
@@ -166,8 +177,12 @@ export class DuelShip {
           aimZone: this.action.aimZone,
           distance: 0,
           launchedAtMs: timeMs,
-          launchTrack: {ageMs:target.trackAgeMs, confidence:target.confidence.overall,
-            estimatedAspect:aspect(aim.angle,target.estimatedHeading), uncertainty:target.positionUncertainty},
+          launchTrack: {
+            ageMs: target.trackAgeMs,
+            confidence: target.confidence.overall,
+            estimatedAspect: aspect(aim.angle, target.estimatedHeading),
+            uncertainty: target.positionUncertainty,
+          },
         });
         this.stats.shots++;
         this.stats[this.action.shell]++;
@@ -176,18 +191,28 @@ export class DuelShip {
     return shells;
   }
   turretConstraints(index, aim) {
-    const turret=this.turrets[index], reasons=[];
-    if (!aim.usable) reasons.push('TRACK');
-    if (!turretCanBear(this,index,aim.angle)) reasons.push('ARC');
-    if (Math.abs(angleDelta(turret.angle,aim.angle))>C.alignment) reasons.push('TRAVERSE');
-    if (turret.reload>0) reasons.push('RELOAD');
-    if (turret.impaired>0) reasons.push('IMPAIRED');
-    if (aim.range>C.maxRange) reasons.push('RANGE');
+    const turret = this.turrets[index],
+      reasons = [];
+    if (!aim.usable) reasons.push("TRACK");
+    if (!turretCanBear(this, index, aim.angle)) reasons.push("ARC");
+    if (Math.abs(angleDelta(turret.angle, aim.angle)) > C.alignment)
+      reasons.push("TRAVERSE");
+    if (turret.reload > 0) reasons.push("RELOAD");
+    if (turret.impaired > 0) reasons.push("IMPAIRED");
+    if (aim.range > C.maxRange) reasons.push("RANGE");
     return reasons;
   }
   actionConstraints(track) {
-    if(this.action.fire !== 'FIRE') return [];
-    return this.turrets.map((_,i)=>({turret:i,reasons:this.turretConstraints(i,aimSolution(this,track,i,this.action.aimZone))})).filter(c=>c.reasons.length);
+    if (this.action.fire !== "FIRE") return [];
+    return this.turrets
+      .map((_, i) => ({
+        turret: i,
+        reasons: this.turretConstraints(
+          i,
+          aimSolution(this, track, i, this.action.aimZone),
+        ),
+      }))
+      .filter((c) => c.reasons.length);
   }
 }
 
@@ -196,7 +221,10 @@ export function tacticalSnapshot(sim, id) {
   const self = sim.ships.find((s) => s.id === id),
     enemy = sim.ships.find((s) => s.id !== id);
   const track = sim.trackers[id].estimate(sim.timeMs);
-  const bearing = Math.atan2(track.position.y - self.y, track.position.x - self.x),
+  const bearing = Math.atan2(
+      track.position.y - self.y,
+      track.position.x - self.x,
+    ),
     range = Math.hypot(track.position.x - self.x, track.position.y - self.y);
   const turrets = self.turrets.map((t, i) => {
     const aim = aimSolution(self, track, i, self.action.aimZone);
@@ -281,10 +309,14 @@ export class DuelSimulation {
   constructor({
     seed = 42,
     swapped = false,
+    scenario = "HEAD_ON",
     timeLimitMs = C.timeLimitMs,
   } = {}) {
     this.seed = seed >>> 0;
     this.swapped = swapped;
+    if (!Object.hasOwn(C.scenarios, scenario))
+      throw new Error("Invalid scenario");
+    this.scenario = scenario;
     this.timeLimitMs = timeLimitMs;
     this.tick = 0;
     this.timeMs = 0;
@@ -296,26 +328,57 @@ export class DuelSimulation {
       new DuelShip("bravo", swapped ? "A" : "B", this.seed),
     ];
     this.projectiles = [];
+    this.ships.forEach((s, i) => {
+      s.heading = C.scenarios[scenario][i] + (swapped ? Math.PI : 0);
+      s.holdHeading = s.heading;
+      s.turrets.forEach(
+        (t, j) => (t.angle = s.heading + (j < 2 ? 0 : Math.PI)),
+      );
+    });
     this.impacts = [];
     this.frames = [];
-    this.trackers = {alpha: new TargetTracker(), bravo: new TargetTracker()};
+    this.trackers = { alpha: new TargetTracker(), bravo: new TargetTracker() };
     this.trackResearch = [];
     this.observeTargets();
   }
   observeTargets() {
     for (const observer of this.ships) {
-      const target = this.ships.find(s => s.id !== observer.id);
-      this.trackers[observer.id].add(observePose(
-        {x: target.x, y: target.y, heading: target.heading}, this.timeMs,
-        observer.streams.observation, this.swapped));
+      const target = this.ships.find((s) => s.id !== observer.id);
+      this.trackers[observer.id].add(
+        observePose(
+          { x: target.x, y: target.y, heading: target.heading },
+          this.timeMs,
+          observer.streams.observation,
+          this.swapped,
+        ),
+      );
       const track = this.trackers[observer.id].estimate(this.timeMs);
       // Research output only. Never passed back into a snapshot or director.
-      this.trackResearch.push({label:'GROUND TRUTH - ANALYSIS ONLY', timeMs:this.timeMs, observer:observer.id,
-        positionError:Math.hypot(track.position.x-target.x,track.position.y-target.y),
-        velocityError:track.estimatedSpeed === null ? null : Math.hypot(track.estimatedVelocity.x-target.vx,track.estimatedVelocity.y-target.vy),
-        speedError:track.estimatedSpeed === null ? null : Math.abs(track.estimatedSpeed-target.speed),
-        headingErrorDegrees:Math.abs(angleDelta(target.heading,track.estimatedHeading))*180/Math.PI,
-        confidence:track.confidence.overall, uncertainty:track.positionUncertainty });
+      this.trackResearch.push({
+        label: "GROUND TRUTH - ANALYSIS ONLY",
+        timeMs: this.timeMs,
+        observer: observer.id,
+        positionError: Math.hypot(
+          track.position.x - target.x,
+          track.position.y - target.y,
+        ),
+        velocityError:
+          track.estimatedSpeed === null
+            ? null
+            : Math.hypot(
+                track.estimatedVelocity.x - target.vx,
+                track.estimatedVelocity.y - target.vy,
+              ),
+        speedError:
+          track.estimatedSpeed === null
+            ? null
+            : Math.abs(track.estimatedSpeed - target.speed),
+        headingErrorDegrees:
+          (Math.abs(angleDelta(target.heading, track.estimatedHeading)) * 180) /
+          Math.PI,
+        confidence: track.confidence.overall,
+        uncertainty: track.positionUncertainty,
+      });
     }
   }
   invalidate(reason) {
@@ -328,11 +391,16 @@ export class DuelSimulation {
     this.tick++;
     this.timeMs = (this.tick * 1000) / 60;
     // Read both pre-movement poses before either moves; fire both before damage.
-    const tracks = Object.fromEntries(this.ships.map(s => [s.id, this.trackers[s.id].estimate(this.timeMs)]));
-    this.ships.forEach(s => s.move(tracks[s.id].position));
-    if (this.tick % Math.round(C.observationIntervalMs / (C.dt*1000)) === 0) this.observeTargets();
+    const tracks = Object.fromEntries(
+      this.ships.map((s) => [s.id, this.trackers[s.id].estimate(this.timeMs)]),
+    );
+    this.ships.forEach((s) => s.move(tracks[s.id].position));
+    if (this.tick % Math.round(C.observationIntervalMs / (C.dt * 1000)) === 0)
+      this.observeTargets();
     this.ships.forEach((s) =>
-      this.projectiles.push(...s.weapons(this.trackers[s.id].estimate(this.timeMs), this.timeMs)),
+      this.projectiles.push(
+        ...s.weapons(this.trackers[s.id].estimate(this.timeMs), this.timeMs),
+      ),
     );
     const pending = [],
       remaining = [];
@@ -346,7 +414,16 @@ export class DuelSimulation {
       };
       const hit = hullIntersection(shell, next, target);
       shell.distance += travel * (hit?.fraction ?? 1);
-      if (hit) pending.push(resolveImpact(shell, target, hit, shooter.streams.armor, shooter.streams.modules));
+      if (hit)
+        pending.push(
+          resolveImpact(
+            shell,
+            target,
+            hit,
+            shooter.streams.armor,
+            shooter.streams.modules,
+          ),
+        );
       else if (shell.distance < C.maxRange)
         remaining.push({ ...shell, ...next });
     }

@@ -1,24 +1,54 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
-import { DuelRunner } from '../duel/runner.js';
-import { tacticalSnapshot } from '../duel/simulation.js';
-import { aimSolution } from '../duel/combat.js';
-import { TargetTracker } from '../duel/tracking.js';
-test('application constraints stay frozen when a successful shot subsequently enters reload', () => {
-  const r=new DuelRunner(), a=r.sim.ships[0];
-  a.x=500;a.y=500;a.heading=0;
-  const t=new TargetTracker();for(let i=0;i<6;i++)t.add({timestamp:i*100,x:500,y:900,heading:0});
-  r.sim.trackers.alpha=t;r.sim.tick=30;r.sim.timeMs=500;r.nextOpportunityMs=10000;
-  const track=t.estimate(500);
-  a.turrets.forEach((turret,i)=>turret.angle=aimSolution(a,track,i,'MIDSHIPS').angle);
-  const event=r.event('alpha',tacticalSnapshot(r.sim,'alpha'));
-  r.apply('alpha',event,{action:{maneuver:'HOLD_COURSE',fire:'FIRE',shell:'HE',aimZone:'MIDSHIPS'}});
-  assert.deepEqual(event.constraintsAtApply,[]);assert.equal(event.blockedAtApply,false);
-  r.tick();r.tick();
-  assert.equal(event.firedDuringDecisionWindow,true);assert.ok(event.firstFireTimeMs>500);
-  assert.equal(event.blockedAtApply,false);assert.deepEqual(event.constraintsAtApply,[]);
-  assert.ok(event.constraintsEncounteredDuringAction.some(c=>c.reason==='RELOAD'));
-  assert.ok(event.firstConstraintTimeMs>event.firstFireTimeMs);
-  assert.ok(event.trackAtRequest.confidence);assert.ok(event.trackAtApply.confidence);
-  assert.ok(r.export().trackResearch.every(row=>row.label==='GROUND TRUTH - ANALYSIS ONLY'));
+import test from "node:test";
+import assert from "node:assert/strict";
+import { DuelRunner } from "../duel/runner.js";
+import { tacticalSnapshot } from "../duel/simulation.js";
+import { aimSolution } from "../duel/combat.js";
+import { TargetTracker } from "../duel/tracking.js";
+test("application constraints stay frozen when a successful shot subsequently enters reload", () => {
+  const r = new DuelRunner(),
+    a = r.sim.ships[0];
+  a.x = 500;
+  a.y = 500;
+  a.heading = 0;
+  const t = new TargetTracker();
+  for (let i = 0; i < 6; i++)
+    t.add({ timestamp: i * 100, x: 500, y: 900, heading: 0 });
+  r.sim.trackers.alpha = t;
+  r.sim.tick = 30;
+  r.sim.timeMs = 500;
+  r.nextOpportunityMs = 10000;
+  const track = t.estimate(500);
+  a.turrets.forEach(
+    (turret, i) => (turret.angle = aimSolution(a, track, i, "MIDSHIPS").angle),
+  );
+  const event = r.event("alpha", tacticalSnapshot(r.sim, "alpha"));
+  r.apply("alpha", event, {
+    action: {
+      maneuver: "HOLD_COURSE",
+      fire: "FIRE",
+      shell: "HE",
+      aimZone: "MIDSHIPS",
+    },
+  });
+  assert.deepEqual(event.constraintsAtApply, []);
+  assert.equal(event.blockedAtApply, false);
+  r.tick();
+  r.tick();
+  assert.equal(event.firedDuringDecisionWindow, true);
+  assert.ok(event.firstFireTimeMs > 500);
+  assert.equal(event.blockedAtApply, false);
+  assert.deepEqual(event.constraintsAtApply, []);
+  assert.ok(
+    event.constraintsEncounteredDuringAction.some((c) => c.reason === "RELOAD"),
+  );
+  assert.ok(event.firstConstraintTimeMs > event.firstFireTimeMs);
+  assert.ok(event.trackAtRequest.confidence);
+  assert.ok(event.trackAtApply.confidence);
+  assert.ok(
+    r
+      .export()
+      .trackResearch.every(
+        (row) => row.label === "GROUND TRUTH - ANALYSIS ONLY",
+      ),
+  );
 });

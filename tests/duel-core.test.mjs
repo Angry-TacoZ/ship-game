@@ -15,7 +15,7 @@ import {
   tacticalSnapshot,
 } from "../duel/simulation.js";
 import { deterministicPolicy } from "../duel/policy.js";
-import { stationaryTrack } from './track-fixture.mjs';
+import { stationaryTrack } from "./track-fixture.mjs";
 
 const fire = {
   maneuver: "HOLD_COURSE",

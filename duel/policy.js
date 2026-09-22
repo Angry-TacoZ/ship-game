@@ -35,7 +35,10 @@ export function deterministicPolicy(snapshot) {
   } else if (s.hpPct < 0.3 && s.hpPct < e.hpPct) {
     maneuver = `ANGLE_AWAY_${side}`;
     ruleId = "KITE_DAMAGED";
-  } else if (loaded >= 2 && (safeReload || e.track.aspectEstimate >= 60 || loaded === 4)) {
+  } else if (
+    loaded >= 2 &&
+    (safeReload || e.track.aspectEstimate >= 60 || loaded === 4)
+  ) {
     maneuver = `BROADSIDE_${side}`;
     ruleId = "CROSS_FIRE_WINDOW";
   } else {

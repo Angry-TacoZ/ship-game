@@ -6,6 +6,11 @@ export const CONFIG = Object.freeze({
   width: 2200,
   height: 1400,
   startingSeparation: 1100,
+  scenarios: Object.freeze({
+    HEAD_ON: Object.freeze([0.15, Math.PI + 0.15]),
+    PARALLEL: Object.freeze([Math.PI / 2, Math.PI / 2]),
+    CROSSING: Object.freeze([0.15, Math.PI / 2]),
+  }),
   decisionIntervalMs: 250,
   timeLimitMs: 120000,
   hp: 10000,
@@ -57,11 +62,24 @@ export const CONFIG = Object.freeze({
   maturityConfidence: Object.freeze([0, 0.2, 0.35, 0.5, 0.65, 0.8, 1]),
   positionResidualThresholds: Object.freeze([3, 8, 15]),
   headingResidualThresholdsDegrees: Object.freeze([2, 5]),
-  trackAgeBands: Object.freeze([
-    [150, "FRESH", 1], [300, "GOOD", 0.9], [500, "AGING", 0.75],
-    [750, "STALE", 0.55], [1000, "VERY_STALE", 0.35], [1500, "POOR", 0.2],
-  ].map(Object.freeze)),
-  uncertaintyAnchors: Object.freeze([[0, 2], [500, 8], [1000, 20], [1500, 38]].map(Object.freeze)),
+  trackAgeBands: Object.freeze(
+    [
+      [150, "FRESH", 1],
+      [300, "GOOD", 0.9],
+      [500, "AGING", 0.75],
+      [750, "STALE", 0.55],
+      [1000, "VERY_STALE", 0.35],
+      [1500, "POOR", 0.2],
+    ].map(Object.freeze),
+  ),
+  uncertaintyAnchors: Object.freeze(
+    [
+      [0, 2],
+      [500, 8],
+      [1000, 20],
+      [1500, 38],
+    ].map(Object.freeze),
+  ),
 });
 export const ACTIONS = Object.freeze({
   maneuver: Object.freeze([
@@ -87,10 +105,22 @@ export const INITIAL_ACTION = Object.freeze({
 });
 // One coherent bounded Choice, retaining every existing action (including
 // pre-aiming a selected zone/ammunition while holding fire): 9*2*2*3 = 108.
-export const PLANS = Object.freeze(Object.fromEntries(ACTIONS.maneuver.flatMap(maneuver =>
-  ACTIONS.fire.flatMap(fire => ACTIONS.shell.flatMap(shell => ACTIONS.aimZone.map(aimZone =>
-    [`${maneuver}__${fire}__${shell}__${aimZone}`, Object.freeze({maneuver,fire,shell,aimZone})]))))));
-export const planKey = action => `${action.maneuver}__${action.fire}__${action.shell}__${action.aimZone}`;
+export const PLANS = Object.freeze(
+  Object.fromEntries(
+    ACTIONS.maneuver.flatMap((maneuver) =>
+      ACTIONS.fire.flatMap((fire) =>
+        ACTIONS.shell.flatMap((shell) =>
+          ACTIONS.aimZone.map((aimZone) => [
+            `${maneuver}__${fire}__${shell}__${aimZone}`,
+            Object.freeze({ maneuver, fire, shell, aimZone }),
+          ]),
+        ),
+      ),
+    ),
+  ),
+);
+export const planKey = (action) =>
+  `${action.maneuver}__${action.fire}__${action.shell}__${action.aimZone}`;
 export const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
 export const angleDelta = (from, to) =>
   Math.atan2(Math.sin(to - from), Math.cos(to - from));
@@ -109,7 +139,8 @@ export function rng(seed) {
 // independently of the physical-side rotation in each four-condition seed.
 export function streamSeed(seed, role, purpose) {
   let hash = seed >>> 0;
-  for (const c of `${role}:${purpose}`) hash = Math.imul(hash ^ c.charCodeAt(0), 16777619) >>> 0;
+  for (const c of `${role}:${purpose}`)
+    hash = Math.imul(hash ^ c.charCodeAt(0), 16777619) >>> 0;
   return hash;
 }
 export function validateAction(value) {
