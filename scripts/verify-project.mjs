@@ -1,21 +1,15 @@
 import { createServer } from "node:http";
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { chromium, devices } from "playwright";
+import { serveStatic } from "../server/static.js";
+import { verifyDuel } from "./verify-duel.mjs";
 
 const host = "127.0.0.1";
 const port = 4173;
 const baseUrl = `http://${host}:${port}`;
 const outputDirectory = "output/playwright";
 
-const server = createServer(async (_request, response) => {
-  try {
-    response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-    response.end(await readFile("index.html"));
-  } catch (error) {
-    response.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
-    response.end(error.message);
-  }
-});
+const server = createServer(serveStatic);
 
 function startServer() {
   return new Promise((resolve, reject) => {
@@ -223,6 +217,7 @@ try {
     await verifyWaveProgression(browser);
     await verifyWave5LevelUp(browser);
     await verifyTouch(browser);
+    await verifyDuel(browser, baseUrl, outputDirectory);
   } finally {
     await browser.close();
   }

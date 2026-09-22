@@ -1,5 +1,14 @@
 Original prompt: Recover the playable browser naval game and continue its development.
 
+## AI Duel Lab experiment
+
+- Request: compare Jev tactical decisions with deterministic rules under real decision latency, using identical ships and observable outcomes. Source baseline is main `d73662a`; experimental branch is `codex/ai-duel-lab`.
+- Architecture inspected: legacy committed enemy steering, fixed tick, turrets, projectile radius tests and verifier routes. New duel uses separate ES modules; legacy page only gains a mode link.
+- Common combat and policy checks pass: swept oriented hull hits, AP/HE aspect rules, actual turret arcs, module impairment, seeded repeatability, five fixed mirrored seeds and reversed update order.
+- Official TypeSafe HTTP/Choice/model documentation checked on 2026-09-22. Four independent Choice questions use one request. Proxy is local-only, env-key protected, explicitly enabled, bounded and mocked in verification.
+- Readiness and final verification evidence are recorded in `AI-DUEL-EXPERIMENT.md`; no real Jev benchmark conclusions are justified without live data.
+- Final local checks: 28 Node tests, original-game and duel desktop/keyboard/touch browser paths, ten offline control trials (five mirrored pairs), static package allowlist/secret scan and web-game client screenshots passed. No API requests were made to TypeSafe.
+
 ## Current state
 
 - The recovered static game is prepared for GitHub Pages.

@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>AI Duel Lab · Naval tactics & latency</title>
+    <link rel="stylesheet" href="duel/style.css" />
+  </head>
+  <body>
+    <header>
+      <a href="index.html" class="back">← SHIP GAME</a
+      ><span class="eyebrow">EXPERIMENT 01 / OPEN WATER</span
+      ><span class="local">● LOCAL RESEARCH BUILD</span>
+    </header>
+    <main>
+      <div class="intro">
+        <div>
+          <h1>AI DUEL <span>LAB</span></h1>
+          <p>Same ships. Same rules. Different decisions.</p>
+        </div>
+        <p class="question">
+          Does tactical judgment<br />arrive in time to matter?
+        </p>
+      </div>
+      <form id="controls" class="controls">
+        <label
+          >CONDITION<select id="mode">
+            <option value="CONTROL">Deterministic control</option>
+            <option value="MOCK">Mock latency · delayed rules</option>
+            <option value="JEV" disabled>
+              Live Jev · local server required
+            </option>
+          </select></label
+        >
+        <label
+          >SEED<input
+            id="seed"
+            type="number"
+            min="0"
+            max="4294967295"
+            step="1"
+            value="42"
+            required
+        /></label>
+        <label
+          >ADDED DELAY<select id="delay">
+            <option value="0">Natural / +0 ms</option>
+            <option value="100">+100 ms</option>
+            <option value="250">+250 ms</option>
+            <option value="500">+500 ms</option>
+            <option value="1000">+1000 ms</option>
+          </select></label
+        >
+        <label class="check"
+          ><input type="checkbox" id="swapped" /> Swap starting sides</label
+        >
+        <button type="submit" class="primary" id="run">Run duel ↗</button>
+        <button type="button" id="stop" disabled>Stop</button>
+      </form>
+      <div class="subcontrols">
+        <button id="restart">Restart same seed</button
+        ><button id="new-seed">New seed</button
+        ><button id="mirror">Run mirrored trial</button
+        ><button id="export">Export JSON</button
+        ><button id="csv">Summary CSV</button
+        ><label class="check"
+          ><input type="checkbox" id="arcs" checked /> Show turret arcs</label
+        >
+      </div>
+      <p id="notice" class="notice" role="status">
+        Control condition. Both ships use the same transparent rules. No
+        provider calls.
+      </p>
+      <section class="workspace" aria-label="Duel observer">
+        <div class="arena-wrap">
+          <div class="arena-bar">
+            <span id="battle-status">READY / CONTROL</span
+            ><span id="clock">00:00.0 / 02:00</span>
+          </div>
+          <canvas
+            id="arena"
+            width="1600"
+            height="1000"
+            aria-label="Top-down duel arena; detailed ship state is available in the observer panels"
+          ></canvas>
+          <div class="legend">
+            <span><i class="blue"></i> α DETERMINISTIC</span
+            ><span id="legend-bravo"
+              ><i class="orange"></i> β DETERMINISTIC</span
+            ><span>AP <b class="ap">━</b> &nbsp; HE <b class="he">━</b></span>
+          </div>
+          <div class="caption">
+            <strong>ANGLE ↔ FIREPOWER</strong
+            ><span
+              >Bow-on: 2 turrets, AP protection. Broadside: 4 turrets, citadel
+              exposure.</span
+            >
+          </div>
+          <div
+            id="impact-feed"
+            class="impact-feed"
+            aria-label="Recent shell impacts"
+          >
+            Awaiting first salvo.
+          </div>
+        </div>
+        <aside>
+          <div id="alpha" class="ship-panel"></div>
+          <div id="bravo" class="ship-panel"></div>
+        </aside>
+      </section>
+      <section class="timing">
+        <div>
+          <span class="eyebrow">THE LATENCY EXPERIMENT</span>
+          <h2 id="timing-title">Decisions share a 250 ms cadence.</h2>
+          <p id="timing-detail">
+            Both policies receive the same observation schema and use the same
+            helm and fire control.
+          </p>
+        </div>
+        <div class="timing-metric">
+          <span id="provider-ms">—</span><small>PROVIDER ROUND TRIP</small>
+        </div>
+        <div class="timing-metric">
+          <span id="age-ms">—</span><small>STATE AGE AT APPLICATION</small>
+        </div>
+        <div class="timing-metric">
+          <span id="missed">0</span><small>MISSED DECISION SLOTS</small>
+        </div>
+      </section>
+      <section id="results" hidden>
+        <h2 id="result-title">Battle result</h2>
+        <p id="result-detail"></p>
+        <div id="result-table"></div>
+        <p>
+          Exports include every snapshot, decision, impact, configuration and 10
+          Hz position frames. Mock runs are never real Jev results.
+        </p>
+      </section>
+      <footer>
+        <span
+          >60 Hz simulation · identical battleships · seeded dispersion ·
+          simultaneous damage</span
+        ><span>World of Warships-inspired, intentionally simplified.</span>
+      </footer>
+    </main>
+    <script type="module" src="duel/ui.js"></script>
+  </body>
+</html>
