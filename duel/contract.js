@@ -1,11 +1,12 @@
 import { ACTIONS, CONFIG as C, validateAction } from "./config.js";
 import { DuelSimulation, tacticalSnapshot } from "./simulation.js";
+import { TURN_TRENDS, SPEED_TRENDS, TRACK_QUALITIES } from './tracking.js';
 
 const template = tacticalSnapshot(new DuelSimulation(), "alpha");
 // Exact recursive schema: reject extra fields, text payloads, NaNs and unbounded numbers.
 function check(value, expected) {
   if (expected === null) {
-    if (value !== null && (!Number.isFinite(value) || value < 0 || value > 1e6))
+    if (value !== null && (!Number.isFinite(value) || Math.abs(value) > 1e6))
       throw new Error("Invalid observation");
     return;
   }
@@ -38,7 +39,7 @@ function check(value, expected) {
 export function validateSnapshot(value) {
   check(value, template);
   if (
-    value.schemaVersion !== 1 ||
+    value.schemaVersion !== 2 ||
     value.timeMs < 0 ||
     value.timeMs > C.timeLimitMs ||
     !ACTIONS.maneuver.includes(value.self.intent) ||
@@ -55,15 +56,25 @@ export function validateSnapshot(value) {
       unit.hp > C.hp ||
       unit.hpPct < 0 ||
       unit.hpPct > 1 ||
-      unit.speed < 0 ||
-      unit.speed > C.maxSpeed + 1 ||
-      unit.aspect < 0 ||
-      unit.aspect > 90 ||
       unit.range < 0 ||
-      unit.range > 2000
+      unit.range > Math.hypot(C.width,C.height) + 200
     )
       throw new Error("Invalid observation");
   }
+  const track = value.opponent.track;
+  if (track.kind !== 'TARGET_TRACK' || !TURN_TRENDS.includes(track.turnTrend) ||
+      !SPEED_TRENDS.includes(track.speedTrend) || !TRACK_QUALITIES.includes(track.quality) ||
+      !['ACQUIRING','ROUGH','DEVELOPING','ESTABLISHED'].includes(track.maturity) ||
+      !Number.isInteger(track.sampleCount) || track.sampleCount<0 || track.sampleCount>C.trackHistory ||
+      track.trackAgeMs<0 || track.positionUncertainty<0 || track.aspectEstimate<0 || track.aspectEstimate>90 ||
+      (track.estimatedSpeed !== null && (track.estimatedSpeed<0 || track.estimatedSpeed>200)) ||
+      Object.values(track.confidence).some(c => c<0 || c>1) ||
+      value.self.speed<0 || value.self.speed>C.maxSpeed+1 || value.self.aspect<0 || value.self.aspect>90)
+    throw new Error('Invalid observation');
+  for (const angle of [track.estimatedHeading, track.estimatedDirectionOfTravel])
+    if (angle !== null && Math.abs(angle)>Math.PI+1e-8) throw new Error('Invalid observation');
+  for (const time of [value.opponent.lastObservedSalvoMs,value.opponent.estimatedReloadMs])
+    if(time !== null && time<0) throw new Error('Invalid observation');
   for (const t of value.self.turrets)
     if (
       t.reloadPct < 0 ||

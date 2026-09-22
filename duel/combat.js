@@ -60,7 +60,11 @@ export function turretCanBear(ship, index, worldAngle) {
   const center = index < 2 ? 0 : Math.PI;
   return Math.abs(angleDelta(ship.heading + center, worldAngle)) <= C.turretArc;
 }
-export function aimSolution(ship, target, index, zone) {
+export function aimSolution(ship, track, index, zone) {
+  if (track?.kind !== 'TARGET_TRACK' || 'vx' in track || 'speed' in track)
+    throw new Error('Gun director requires a TargetTrack, not a physical target');
+  const target = { ...track.position, heading: track.estimatedHeading ?? 0,
+    vx: track.estimatedVelocity.x ?? 0, vy: track.estimatedVelocity.y ?? 0 };
   const origin = worldPoint(ship, C.turretOffsets[index]);
   const aim = worldPoint(
     target,
@@ -82,6 +86,8 @@ export function aimSolution(ship, target, index, zone) {
     : Math.sqrt(c) / C.shellSpeed;
   return {
     origin,
+    usable: track.quality !== 'LOST' && track.estimatedSpeed !== null,
+    flightTimeSeconds: time,
     angle: Math.atan2(dy + target.vy * time, dx + target.vx * time),
     range: Math.sqrt(c),
   };

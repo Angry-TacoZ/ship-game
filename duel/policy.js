@@ -35,18 +35,18 @@ export function deterministicPolicy(snapshot) {
   } else if (s.hpPct < 0.3 && s.hpPct < e.hpPct) {
     maneuver = `ANGLE_AWAY_${side}`;
     ruleId = "KITE_DAMAGED";
-  } else if (loaded >= 2 && (safeReload || e.aspect >= 60 || loaded === 4)) {
+  } else if (loaded >= 2 && (safeReload || e.track.aspectEstimate >= 60 || loaded === 4)) {
     maneuver = `BROADSIDE_${side}`;
     ruleId = "CROSS_FIRE_WINDOW";
   } else {
     maneuver = `ANGLE_IN_${side}`;
     ruleId = "REPOSITION_DEFENSIVE";
   }
-  const shell = e.aspect >= 50 && s.range < 900 ? "AP" : "HE";
+  const shell = e.track.aspectEstimate >= 50 && s.range < 900 ? "AP" : "HE";
   const aimZone =
     shell === "AP"
       ? "MIDSHIPS"
-      : e.visibleModules.steering <= 0 && e.speed > 25
+      : e.visibleModules.steering <= 0 && e.track.estimatedSpeed > 25
         ? "STERN"
         : "BOW";
   return {

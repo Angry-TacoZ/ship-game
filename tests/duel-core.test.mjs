@@ -15,6 +15,7 @@ import {
   tacticalSnapshot,
 } from "../duel/simulation.js";
 import { deterministicPolicy } from "../duel/policy.js";
+import { stationaryTrack } from './track-fixture.mjs';
 
 const fire = {
   maneuver: "HOLD_COURSE",
@@ -57,7 +58,7 @@ test("bow/stern expose two turrets; broadside exposes all four; illegal arcs do 
   s.turrets.forEach((t) => {
     t.angle = 0;
   });
-  assert.equal(s.weapons(e, 0).length, 4);
+  assert.equal(s.weapons(stationaryTrack(e), 0).length, 4);
   assert.ok(s.blocked.some((b) => b.turret === 2 && b.reasons.includes("ARC")));
 });
 test("AP aspect, HE, range penetration, zones and citadel consequences", () => {
@@ -131,7 +132,7 @@ test("temporary engine, steering and turret impairments affect common mechanics"
     t.angle = 0;
     t.impaired = 4000;
   });
-  assert.equal(c.weapons(e, 0).length, 0);
+  assert.equal(c.weapons(stationaryTrack(e), 0).length, 0);
 });
 test("seeded RNG repeats", () => {
   const a = rng(7),

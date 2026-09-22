@@ -101,7 +101,7 @@ export class DuelRunner {
       stateAgeAtApplyMs: this.sim.timeMs - event.snapshot.timeMs,
       stateChange: {
         rangeDelta: current.self.range - event.snapshot.self.range,
-        aspectDelta: current.opponent.aspect - event.snapshot.opponent.aspect,
+        aspectDelta: current.opponent.track.aspectEstimate - event.snapshot.opponent.track.aspectEstimate,
         hpDelta: current.self.hp - event.snapshot.self.hp,
         damageTaken: event.snapshot.self.hp - current.self.hp,
         firingOpportunityOpened:
@@ -345,6 +345,7 @@ export class DuelRunner {
       decisions: this.events,
       impacts: this.sim.impacts,
       frames: this.sim.frames,
+      trackResearch: this.sim.trackResearch,
     };
   }
 }

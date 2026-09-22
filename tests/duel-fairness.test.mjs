@@ -5,6 +5,7 @@ import { DuelShip } from "../duel/simulation.js";
 import { CONFIG as C } from "../duel/config.js";
 import { resolveImpact, turretCanBear, aimSolution } from "../duel/combat.js";
 import { deterministicPolicy } from "../duel/policy.js";
+import { stationaryTrack } from './track-fixture.mjs';
 
 test("simultaneous lethal shells produce draw regardless of ship order", () => {
   for (const reverse of [false, true]) {
@@ -72,12 +73,12 @@ test("reload and finite traverse physically gate shots, not heading damage multi
   s.turrets.forEach((t) => {
     t.angle = 0;
   });
-  assert.equal(s.weapons(e, 0).length, 0);
+  assert.equal(s.weapons(stationaryTrack(e), 0).length, 0);
   s.turrets.forEach((t, i) => {
-    t.angle = aimSolution(s, e, i, "MIDSHIPS").angle;
+    t.angle = aimSolution(s, stationaryTrack(e), i, "MIDSHIPS").angle;
   });
-  assert.equal(s.weapons(e, 1).length, 8);
-  assert.equal(s.weapons(e, 2).length, 0);
+  assert.equal(s.weapons(stationaryTrack(e), 1).length, 8);
+  assert.equal(s.weapons(stationaryTrack(e), 2).length, 0);
   assert.ok(
     s.turrets.every((t) => turretCanBear(s, s.turrets.indexOf(t), t.angle)),
   );
@@ -103,7 +104,7 @@ test("module hit effects use configured zone consequences and recover", () => {
   target.modules.steering = 1;
   target.turrets[0].impaired = 1;
   target.move({ x: 0, y: 0 });
-  target.weapons(new DuelShip("alpha", "A", 2), 0);
+  target.weapons(stationaryTrack(new DuelShip("alpha", "A", 2)), 0);
   assert.equal(target.modules.engine, 0);
   assert.equal(target.modules.steering, 0);
   assert.equal(target.turrets[0].impaired, 0);
@@ -115,9 +116,9 @@ test("transparent baseline chooses AP broadside, HE angled, separation, approach
   s.self.range = 200;
   assert.equal(deterministicPolicy(s).ruleId, "SEPARATE");
   s.self.range = 500;
-  s.opponent.aspect = 90;
+  s.opponent.track.aspectEstimate = 90;
   assert.equal(deterministicPolicy(s).action.shell, "AP");
-  s.opponent.aspect = 0;
+  s.opponent.track.aspectEstimate = 0;
   assert.equal(deterministicPolicy(s).action.shell, "HE");
   s.self.turrets.forEach((t) => (t.loaded = false));
   assert.equal(deterministicPolicy(s).ruleId, "REPOSITION_DEFENSIVE");

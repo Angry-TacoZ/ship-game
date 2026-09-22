@@ -16,6 +16,7 @@ import {
   hullIntersection,
   resolveImpact,
 } from "./combat.js";
+import { TargetTracker, observePose } from './tracking.js';
 
 export class DuelShip {
   constructor(id, side, seed) {
@@ -148,6 +149,7 @@ export class DuelShip {
           turret.impaired > 0 ? 0 : C.traverseRate * C.dt,
         );
       const reasons = [];
+      if (!aim.usable) reasons.push("TRACK");
       if (!turretCanBear(this, i, aim.angle)) reasons.push("ARC");
       if (Math.abs(angleDelta(turret.angle, aim.angle)) > C.alignment)
         reasons.push("TRAVERSE");
@@ -181,10 +183,11 @@ export class DuelShip {
 export function tacticalSnapshot(sim, id) {
   const self = sim.ships.find((s) => s.id === id),
     enemy = sim.ships.find((s) => s.id !== id);
-  const bearing = Math.atan2(enemy.y - self.y, enemy.x - self.x),
-    range = Math.hypot(enemy.x - self.x, enemy.y - self.y);
+  const track = sim.trackers[id].estimate(sim.timeMs);
+  const bearing = Math.atan2(track.position.y - self.y, track.position.x - self.x),
+    range = Math.hypot(track.position.x - self.x, track.position.y - self.y);
   const turrets = self.turrets.map((t, i) => {
-    const aim = aimSolution(self, enemy, i, self.action.aimZone);
+    const aim = aimSolution(self, track, i, self.action.aimZone);
     const canBear = turretCanBear(self, i, aim.angle),
       error = Math.abs(angleDelta(t.angle, aim.angle));
     return {
@@ -194,6 +197,7 @@ export function tacticalSnapshot(sim, id) {
       traverseError: error,
       impairedMs: t.impaired,
       readyToFire:
+        aim.usable &&
         canBear &&
         error <= C.alignment &&
         t.reload <= 0 &&
@@ -201,9 +205,9 @@ export function tacticalSnapshot(sim, id) {
         range <= C.maxRange,
     };
   });
-  const enemyAspect = aspect(bearing, enemy.heading);
+  const enemyAspect = aspect(bearing, track.estimatedHeading ?? bearing);
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     timeMs: sim.timeMs,
     self: {
       hp: self.hp,
@@ -236,13 +240,9 @@ export function tacticalSnapshot(sim, id) {
     opponent: {
       hp: enemy.hp,
       hpPct: enemy.hp / C.hp,
-      heading: enemy.heading,
-      speed: enemy.speed,
-      position: { x: enemy.x, y: enemy.y },
-      velocity: { x: enemy.vx, y: enemy.vy },
+      track: { ...track, aspectEstimate: enemyAspect },
       range,
       relativeBearing: angleDelta(self.heading, bearing),
-      aspect: enemyAspect,
       descriptor:
         enemyAspect < 30
           ? "BOW_OR_STERN_ON"
@@ -286,6 +286,25 @@ export class DuelSimulation {
     this.projectiles = [];
     this.impacts = [];
     this.frames = [];
+    this.trackers = {alpha: new TargetTracker(), bravo: new TargetTracker()};
+    this.trackResearch = [];
+    this.observeTargets();
+  }
+  observeTargets() {
+    for (const observer of this.ships) {
+      const target = this.ships.find(s => s.id !== observer.id);
+      this.trackers[observer.id].add(observePose(
+        {x: target.x, y: target.y, heading: target.heading}, this.timeMs,
+        observer.streams.observation, this.swapped));
+      const track = this.trackers[observer.id].estimate(this.timeMs);
+      // Research output only. Never passed back into a snapshot or director.
+      this.trackResearch.push({label:'GROUND TRUTH - ANALYSIS ONLY', timeMs:this.timeMs, observer:observer.id,
+        positionError:Math.hypot(track.position.x-target.x,track.position.y-target.y),
+        velocityError:track.estimatedSpeed === null ? null : Math.hypot(track.estimatedVelocity.x-target.vx,track.estimatedVelocity.y-target.vy),
+        speedError:track.estimatedSpeed === null ? null : Math.abs(track.estimatedSpeed-target.speed),
+        headingErrorDegrees:Math.abs(angleDelta(target.heading,track.estimatedHeading))*180/Math.PI,
+        confidence:track.confidence.overall, uncertainty:track.positionUncertainty });
+    }
   }
   invalidate(reason) {
     this.status = "INVALID";
@@ -297,10 +316,11 @@ export class DuelSimulation {
     this.tick++;
     this.timeMs = (this.tick * 1000) / 60;
     // Read both pre-movement poses before either moves; fire both before damage.
-    const poses = this.ships.map((s) => ({ x: s.x, y: s.y }));
-    this.ships.forEach((s, i) => s.move(poses[1 - i]));
-    this.ships.forEach((s, i) =>
-      this.projectiles.push(...s.weapons(this.ships[1 - i], this.timeMs)),
+    const tracks = Object.fromEntries(this.ships.map(s => [s.id, this.trackers[s.id].estimate(this.timeMs)]));
+    this.ships.forEach(s => s.move(tracks[s.id].position));
+    if (this.tick % Math.round(C.observationIntervalMs / (C.dt*1000)) === 0) this.observeTargets();
+    this.ships.forEach((s) =>
+      this.projectiles.push(...s.weapons(this.trackers[s.id].estimate(this.timeMs), this.timeMs)),
     );
     const pending = [],
       remaining = [];

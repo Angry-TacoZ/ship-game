@@ -11,6 +11,8 @@ Original prompt: Recover the playable browser naval game and continue its develo
 
 ## Current state
 
+- PR #10 revision: controller identity now crosses explicit R0/R1 named RNG streams independently of side. Shared 10 Hz observations feed an eight-sample tracker; both the 4 Hz policy snapshot and 60 Hz gun/helm control now use that track, never true enemy motion. Target acquisition, stale/lost tracks, isolated information and intercept errors have regression tests. Existing asynchronous request behavior remains intact.
+
 - The recovered static game is prepared for GitHub Pages.
 - `npm run verify` checks desktop pointer and mobile touch startup/gameplay paths and saves ignored screenshots in `output/playwright/`.
 - The public title is intentionally a neutral genre label until James chooses a final game name.
