@@ -59,3 +59,10 @@ Original prompt: Recover the playable browser naval game and continue its develo
 - Added a main-menu Codex between Options and Credits, with all four playable navy models, country, doctrine summary, weapon stats, and level-one starting values.
 - Reused the gameplay hull and turret renderer for codex models so the cards reflect the actual player-ship silhouettes and mounts.
 - Added desktop keyboard focus/close behavior and mobile touch scrolling; extended `npm run verify` to check rendered models, displayed stats, and menu navigation.
+
+## Island elevation and detail pass
+
+- Added a focused `codex/island-elevation` branch change for layered island terrain: directional gradients, a cast terrain shadow, contour/cliff accents, low hills, rocks, and more readable tree shading.
+- Kept `ISLAND_LAYERS[0]` as the rendered/collision shoreline source and left ship clearance calculations unchanged.
+- Added `?verify-island-detail` fixture coverage and an `output/playwright/island-detail.png` screenshot so the visual change is deterministic and inspectable.
+- `npm run verify` passes after the island render change.
