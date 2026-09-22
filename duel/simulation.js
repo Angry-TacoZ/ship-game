@@ -5,6 +5,7 @@ import {
   angleDelta,
   approach,
   rng,
+  streamSeed,
   validateAction,
 } from "./config.js";
 import {
@@ -37,7 +38,9 @@ export class DuelShip {
     this.action = { ...INITIAL_ACTION };
     this.holdHeading = this.heading;
     this.lastSalvoMs = null;
-    this.random = rng(seed);
+    this.rngRole = id === "alpha" ? "R0" : "R1";
+    this.streamIds = Object.fromEntries(["dispersion", "armor", "modules", "observation"].map(p => [p, `${this.rngRole}:${p}:${streamSeed(seed, this.rngRole, p)}`]));
+    this.streams = Object.fromEntries(["dispersion", "armor", "modules", "observation"].map(p => [p, rng(streamSeed(seed, this.rngRole, p))]));
     this.stats = {
       damageDealt: 0,
       damageReceived: 0,
@@ -157,7 +160,7 @@ export class DuelShip {
       turret.reload = C.reloadMs;
       this.lastSalvoMs = timeMs;
       for (let b = 0; b < C.barrels; b++) {
-        const angle = aim.angle + (this.random() - 0.5) * C.dispersion;
+        const angle = aim.angle + (this.streams.dispersion() - 0.5) * C.dispersion;
         shells.push({
           ...aim.origin,
           angle,
@@ -277,8 +280,8 @@ export class DuelSimulation {
     this.invalidReason = null;
     this.winner = null;
     this.ships = [
-      new DuelShip("alpha", swapped ? "B" : "A", this.seed ^ 0x1234),
-      new DuelShip("bravo", swapped ? "A" : "B", this.seed ^ 0x5678),
+      new DuelShip("alpha", swapped ? "B" : "A", this.seed),
+      new DuelShip("bravo", swapped ? "A" : "B", this.seed),
     ];
     this.projectiles = [];
     this.impacts = [];
@@ -311,7 +314,7 @@ export class DuelSimulation {
       };
       const hit = hullIntersection(shell, next, target);
       shell.distance += travel * (hit?.fraction ?? 1);
-      if (hit) pending.push(resolveImpact(shell, target, hit, shooter.random));
+      if (hit) pending.push(resolveImpact(shell, target, hit, shooter.streams.armor, shooter.streams.modules));
       else if (shell.distance < C.maxRange)
         remaining.push({ ...shell, ...next });
     }

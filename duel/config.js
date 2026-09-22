@@ -78,6 +78,13 @@ export function rng(seed) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
+// Stable named streams: R0=alpha, R1=bravo. Controllers cross these roles
+// independently of the physical-side rotation in each four-condition seed.
+export function streamSeed(seed, role, purpose) {
+  let hash = seed >>> 0;
+  for (const c of `${role}:${purpose}`) hash = Math.imul(hash ^ c.charCodeAt(0), 16777619) >>> 0;
+  return hash;
+}
 export function validateAction(value) {
   if (
     !value ||

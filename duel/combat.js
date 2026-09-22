@@ -87,7 +87,7 @@ export function aimSolution(ship, target, index, zone) {
   };
 }
 
-export function resolveImpact(shell, target, hit, random) {
+export function resolveImpact(shell, target, hit, random, moduleRandom = random) {
   const targetAspect = aspect(shell.angle, target.heading),
     incidence = 90 - targetAspect;
   let outcome = "PENETRATION",
@@ -111,7 +111,7 @@ export function resolveImpact(shell, target, hit, random) {
   }
   const damage = ["RICOCHET", "NONPEN"].includes(outcome) ? 0 : rawDamage;
   let moduleEffect = null;
-  if (damage && random() < C.moduleChance)
+  if (damage && moduleRandom() < C.moduleChance)
     moduleEffect =
       hit.zone === "BOW"
         ? "TURRET"

@@ -19,6 +19,7 @@ export class DuelRunner {
   constructor({
     seed = 42,
     swapped = false,
+    contenderShip = "bravo",
     mode = "CONTROL",
     injectedDelayMs = 0,
     decisionIntervalMs = C.decisionIntervalMs,
@@ -30,6 +31,7 @@ export class DuelRunner {
   } = {}) {
     if (
       !["CONTROL", "MOCK", "JEV"].includes(mode) ||
+      !["alpha", "bravo"].includes(contenderShip) ||
       !Number.isFinite(injectedDelayMs) ||
       injectedDelayMs < 0 ||
       injectedDelayMs > C.maxInjectedDelayMs ||
@@ -42,6 +44,7 @@ export class DuelRunner {
       throw new Error("Missing decision adapter");
     this.sim = new DuelSimulation({ seed, swapped, timeLimitMs });
     this.mode = mode;
+    this.contenderShip = contenderShip;
     this.injectedDelayMs = injectedDelayMs;
     this.interval = decisionIntervalMs;
     this.requestDecision = requestDecision;
@@ -60,7 +63,7 @@ export class DuelRunner {
     this.disposed = false;
   }
   controller(id) {
-    return id === "alpha" || this.mode === "CONTROL"
+    return id !== this.contenderShip || this.mode === "CONTROL"
       ? "DETERMINISTIC"
       : this.mode === "MOCK"
         ? "MOCK_DELAYED_RULES"
@@ -72,6 +75,9 @@ export class DuelRunner {
       simulationTimestampMs: this.sim.timeMs,
       controller: this.controller(id),
       ship: id,
+      startingSide: this.sim.ships.find(s => s.id === id).startingSide,
+      rngRole: this.sim.ships.find(s => s.id === id).rngRole,
+      streamIds: this.sim.ships.find(s => s.id === id).streamIds,
       snapshot,
       requestedAtWallTime: this.wallClock(),
       requestedAtMonotonicMs: this.clock(),
@@ -208,7 +214,7 @@ export class DuelRunner {
         return;
       }
       if (this.pending.ready && this.clock() >= this.pending.applyAfter) {
-        this.apply("bravo", this.pending.event, this.pending.ready);
+        this.apply(this.pending.event.ship, this.pending.event, this.pending.ready);
         this.pending = null;
       }
     }
@@ -221,12 +227,12 @@ export class DuelRunner {
       snapshots.forEach((snapshot, i) => {
         const id = this.sim.ships[i].id;
         if (snapshot.self.firingOpportunity) this.opportunities[id]++;
-        if (id === "bravo" && this.mode !== "CONTROL" && this.pending) {
+        if (id === this.contenderShip && this.mode !== "CONTROL" && this.pending) {
           this.missed++;
           return;
         }
         const event = this.event(id, snapshot);
-        if (id === "bravo" && this.mode !== "CONTROL") this.startRequest(event);
+        if (id === this.contenderShip && this.mode !== "CONTROL") this.startRequest(event);
         else {
           const before = this.clock(),
             result = deterministicPolicy(snapshot);
@@ -279,6 +285,7 @@ export class DuelRunner {
       seed: this.sim.seed,
       mode: this.mode,
       swapped: this.sim.swapped,
+      contenderShip: this.contenderShip,
       configuration: C,
       decisionIntervalMs: this.interval,
       injectedDelayMs: this.injectedDelayMs,
@@ -297,6 +304,8 @@ export class DuelRunner {
         id: s.id,
         controller: this.controller(s.id),
         startingSide: s.startingSide,
+        rngRole: s.rngRole,
+        streamIds: s.streamIds,
         endingHp: s.hp,
         ...s.stats,
         totalDecisions: this.events.filter(
