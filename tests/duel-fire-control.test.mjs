@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DuelSimulation, tacticalSnapshot } from '../duel/simulation.js';
 import { TargetTracker } from '../duel/tracking.js';
-import { aimSolution } from '../duel/combat.js';
+import { aimSolution, dispersionHalfWidth } from '../duel/combat.js';
 import { deterministicPolicy } from '../duel/policy.js';
 import { providerRequest } from '../server/jev.js';
 import { CONFIG as C } from '../duel/config.js';
@@ -45,4 +45,10 @@ test('unknown and lost tracks cannot fire; observation cadence is 10Hz', () => {
   for(let i=0;i<60;i++)sim.step();
   assert.equal(sim.trackResearch.length,22);
   assert.equal(a.weapons(sim.trackers.alpha.estimate(2601),2601).length,0);
+});
+test('engagement range gives meaningful flight time and spread grows physically with range', () => {
+  const sim=new DuelSimulation();
+  assert.equal(Math.abs(sim.ships[0].x-sim.ships[1].x),1100);
+  assert.ok(C.startingSeparation/C.shellSpeed>2.8);
+  assert.deepEqual([500,1000,1500].map(dispersionHalfWidth),[7,16,29]);
 });

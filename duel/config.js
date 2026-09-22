@@ -1,10 +1,11 @@
 // Every physical constant is shared by both contestants. Distances are world units;
 // time is seconds in physics and milliseconds in decisions/telemetry.
 export const CONFIG = Object.freeze({
-  version: "ai-duel-v1",
+  version: "ai-duel-v2",
   dt: 1 / 60,
-  width: 1600,
-  height: 1000,
+  width: 2200,
+  height: 1400,
+  startingSeparation: 1100,
   decisionIntervalMs: 250,
   timeLimitMs: 120000,
   hp: 10000,
@@ -23,8 +24,10 @@ export const CONFIG = Object.freeze({
   turretOffsets: Object.freeze([43, 24, -24, -43]),
   barrels: 2,
   shellSpeed: 380,
-  maxRange: 1050,
-  dispersion: 0.018,
+  maxRange: 1500,
+  dispersionBaseHalfWidth: 2,
+  dispersionLinear: 0.006,
+  dispersionQuadratic: 0.000008,
   apDamage: 310,
   heDamage: 180,
   citadelMultiplier: 3,

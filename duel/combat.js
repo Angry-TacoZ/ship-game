@@ -60,6 +60,11 @@ export function turretCanBear(ship, index, worldAngle) {
   const center = index < 2 ? 0 : Math.PI;
   return Math.abs(angleDelta(ship.heading + center, worldAngle)) <= C.turretArc;
 }
+// Physical lateral half-width, converted to an angular offset at launch.
+// Uniform bounded dispersion; no hit/miss roll and no outcome-dependent spread.
+export function dispersionHalfWidth(range) {
+  return C.dispersionBaseHalfWidth + C.dispersionLinear*range + C.dispersionQuadratic*range*range;
+}
 export function aimSolution(ship, track, index, zone) {
   if (track?.kind !== 'TARGET_TRACK' || 'vx' in track || 'speed' in track)
     throw new Error('Gun director requires a TargetTrack, not a physical target');

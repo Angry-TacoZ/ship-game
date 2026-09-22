@@ -15,6 +15,7 @@ import {
   aimSolution,
   hullIntersection,
   resolveImpact,
+  dispersionHalfWidth,
 } from "./combat.js";
 import { TargetTracker, observePose } from './tracking.js';
 
@@ -22,7 +23,7 @@ export class DuelShip {
   constructor(id, side, seed) {
     this.id = id;
     this.startingSide = side;
-    this.x = side === "A" ? 420 : C.width - 420;
+    this.x = C.width/2 + (side === 'A' ? -1 : 1)*C.startingSeparation/2;
     this.y = C.height / 2;
     this.heading = side === "A" ? 0.15 : Math.PI + 0.15;
     this.speed = 0;
@@ -162,7 +163,8 @@ export class DuelShip {
       turret.reload = C.reloadMs;
       this.lastSalvoMs = timeMs;
       for (let b = 0; b < C.barrels; b++) {
-        const angle = aim.angle + (this.streams.dispersion() - 0.5) * C.dispersion;
+        const lateral = (2*this.streams.dispersion()-1)*dispersionHalfWidth(aim.range);
+        const angle = aim.angle + Math.atan2(lateral, Math.max(1, aim.range));
         shells.push({
           ...aim.origin,
           angle,
