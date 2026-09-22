@@ -143,5 +143,8 @@ export function resolveImpact(shell, target, hit, random, moduleRandom = random)
     finalDamage: damage,
     moduleEffect,
     point: hit.point,
+    launchedAtMs: shell.launchedAtMs ?? null,
+    launchTrack: shell.launchTrack ?? null,
+    analysisLabel: 'GROUND TRUTH - ANALYSIS ONLY',
   };
 }

@@ -149,14 +149,7 @@ export class DuelShip {
           desired,
           turret.impaired > 0 ? 0 : C.traverseRate * C.dt,
         );
-      const reasons = [];
-      if (!aim.usable) reasons.push("TRACK");
-      if (!turretCanBear(this, i, aim.angle)) reasons.push("ARC");
-      if (Math.abs(angleDelta(turret.angle, aim.angle)) > C.alignment)
-        reasons.push("TRAVERSE");
-      if (turret.reload > 0) reasons.push("RELOAD");
-      if (turret.impaired > 0) reasons.push("IMPAIRED");
-      if (aim.range > C.maxRange) reasons.push("RANGE");
+      const reasons = this.turretConstraints(i, aim);
       if (this.action.fire === "FIRE" && reasons.length)
         this.blocked.push({ turret: i, reasons });
       if (this.action.fire !== "FIRE" || reasons.length) return;
@@ -172,12 +165,29 @@ export class DuelShip {
           type: this.action.shell,
           aimZone: this.action.aimZone,
           distance: 0,
+          launchedAtMs: timeMs,
+          launchTrack: {ageMs:target.trackAgeMs, confidence:target.confidence.overall,
+            estimatedAspect:aspect(aim.angle,target.estimatedHeading), uncertainty:target.positionUncertainty},
         });
         this.stats.shots++;
         this.stats[this.action.shell]++;
       }
     });
     return shells;
+  }
+  turretConstraints(index, aim) {
+    const turret=this.turrets[index], reasons=[];
+    if (!aim.usable) reasons.push('TRACK');
+    if (!turretCanBear(this,index,aim.angle)) reasons.push('ARC');
+    if (Math.abs(angleDelta(turret.angle,aim.angle))>C.alignment) reasons.push('TRAVERSE');
+    if (turret.reload>0) reasons.push('RELOAD');
+    if (turret.impaired>0) reasons.push('IMPAIRED');
+    if (aim.range>C.maxRange) reasons.push('RANGE');
+    return reasons;
+  }
+  actionConstraints(track) {
+    if(this.action.fire !== 'FIRE') return [];
+    return this.turrets.map((_,i)=>({turret:i,reasons:this.turretConstraints(i,aimSolution(this,track,i,this.action.aimZone))})).filter(c=>c.reasons.length);
   }
 }
 

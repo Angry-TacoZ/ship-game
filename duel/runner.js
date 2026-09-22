@@ -60,6 +60,8 @@ export class DuelRunner {
     this.latest = {};
     this.opportunities = { alpha: 0, bravo: 0 };
     this.usedOpportunities = { alpha: 0, bravo: 0 };
+    this.firingTicks = {alpha:0,bravo:0};
+    this.opportunityWindows = {};
     this.disposed = false;
   }
   controller(id) {
@@ -92,6 +94,7 @@ export class DuelRunner {
       current = tacticalSnapshot(this.sim, id);
     const action = validateAction(result.action);
     ship.commit(action);
+    const constraintsAtApply = ship.actionConstraints(current.opponent.track);
     Object.assign(event, result, {
       action,
       status: "APPLIED",
@@ -111,8 +114,15 @@ export class DuelRunner {
           event.snapshot.self.firingOpportunity &&
           !current.self.firingOpportunity,
       },
-      blockedByPhysicalConstraints: false,
-      physicalConstraints: [],
+      trackAtRequest: structuredClone(event.snapshot.opponent.track),
+      trackAtApply: structuredClone(current.opponent.track),
+      requestedTrackAgeAtApplyMs: this.sim.timeMs-event.snapshot.timeMs+event.snapshot.opponent.track.trackAgeMs,
+      constraintsAtApply,
+      blockedAtApply: action.fire === 'FIRE' && constraintsAtApply.length === ship.turrets.length,
+      constraintsEncounteredDuringAction: [],
+      firstConstraintTimeMs: constraintsAtApply.length ? this.sim.timeMs : null,
+      firedDuringDecisionWindow: false,
+      firstFireTimeMs: null,
       boundaryBlocked: false,
     });
     this.latest[id] = event;
@@ -227,6 +237,7 @@ export class DuelRunner {
       snapshots.forEach((snapshot, i) => {
         const id = this.sim.ships[i].id;
         if (snapshot.self.firingOpportunity) this.opportunities[id]++;
+        this.opportunityWindows[id] = {observed:snapshot.self.firingOpportunity,used:false};
         if (id === this.contenderShip && this.mode !== "CONTROL" && this.pending) {
           this.missed++;
           return;
@@ -249,16 +260,24 @@ export class DuelRunner {
       const event = this.latest[ship.id];
       if (event) {
         if (ship.blocked.length) {
-          event.blockedByPhysicalConstraints = true;
-          event.physicalConstraints = structuredClone(ship.blocked);
+          event.firstConstraintTimeMs ??= this.sim.timeMs;
+          for (const blocked of ship.blocked) for(const reason of blocked.reasons) {
+            if(!event.constraintsEncounteredDuringAction.some(c=>c.turret===blocked.turret && c.reason===reason))
+              event.constraintsEncounteredDuringAction.push({turret:blocked.turret,reason,firstTimeMs:this.sim.timeMs});
+          }
         }
         if (ship.boundaryBlocked) {
           event.boundaryBlocked = true;
-          event.blockedByPhysicalConstraints = true;
+          event.firstConstraintTimeMs ??= this.sim.timeMs;
+          if(!event.constraintsEncounteredDuringAction.some(c=>c.reason==='BOUNDARY'))
+            event.constraintsEncounteredDuringAction.push({turret:null,reason:'BOUNDARY',firstTimeMs:this.sim.timeMs});
         }
         if (ship.lastSalvoMs === this.sim.timeMs) {
-          event.fired = true;
-          this.usedOpportunities[ship.id]++;
+          event.firedDuringDecisionWindow = true;
+          event.firstFireTimeMs ??= this.sim.timeMs;
+          this.firingTicks[ship.id]++;
+          const window=this.opportunityWindows[ship.id];
+          if(window?.observed && !window.used) { this.usedOpportunities[ship.id]++; window.used=true; }
         }
       }
     }
@@ -312,7 +331,8 @@ export class DuelRunner {
           (e) => e.ship === s.id && e.status === "APPLIED",
         ).length,
         observedFiringOpportunities: this.opportunities[s.id],
-        firingTicks: this.usedOpportunities[s.id],
+        usedFiringOpportunities: this.usedOpportunities[s.id],
+        firingTicks: this.firingTicks[s.id],
         hitRate: s.stats.shots ? s.stats.hits / s.stats.shots : 0,
         damagePerShot: s.stats.shots ? s.stats.damageDealt / s.stats.shots : 0,
       })),
@@ -335,6 +355,8 @@ export class DuelRunner {
         return out;
       }, {}),
       cost: null,
+      trackMetrics: Object.fromEntries(['positionError','velocityError','speedError','headingErrorDegrees','confidence','uncertainty'].map(key =>
+        [key, statistics(this.sim.trackResearch.map(r=>r[key]).filter(Number.isFinite))])),
       costNote:
         "API contract returns token usage, not a monetary cost. No estimated cost substituted.",
     };
