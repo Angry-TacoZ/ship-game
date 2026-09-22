@@ -41,6 +41,24 @@ export const CONFIG = Object.freeze({
   steeringFactor: 0.4,
   timeoutMs: 6000,
   maxInjectedDelayMs: 2000,
+  observationIntervalMs: 100,
+  trackHistory: 8,
+  positionNoise: 1.5,
+  headingNoise: Math.PI / 180,
+  velocityAlpha: 0.35,
+  headingAlpha: 0.4,
+  turnRateAlpha: 0.3,
+  trendPersistence: 3,
+  accelerationThreshold: 4,
+  turnThresholdsDegrees: Object.freeze([2, 5, 10]),
+  maturityConfidence: Object.freeze([0, 0.2, 0.35, 0.5, 0.65, 0.8, 1]),
+  positionResidualThresholds: Object.freeze([3, 8, 15]),
+  headingResidualThresholdsDegrees: Object.freeze([2, 5]),
+  trackAgeBands: Object.freeze([
+    [150, "FRESH", 1], [300, "GOOD", 0.9], [500, "AGING", 0.75],
+    [750, "STALE", 0.55], [1000, "VERY_STALE", 0.35], [1500, "POOR", 0.2],
+  ].map(Object.freeze)),
+  uncertaintyAnchors: Object.freeze([[0, 2], [500, 8], [1000, 20], [1500, 38]].map(Object.freeze)),
 });
 export const ACTIONS = Object.freeze({
   maneuver: Object.freeze([
