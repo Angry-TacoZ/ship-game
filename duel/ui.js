@@ -3,6 +3,7 @@ import { DuelRunner } from "./runner.js";
 import { liveAdapter, mockAdapter } from "./client.js";
 import { tacticalSnapshot } from "./simulation.js";
 import { renderArena } from "./render.js";
+import { TargetTracker } from "./tracking.js";
 
 const $ = (id) => document.getElementById(id),
   canvas = $("arena");
@@ -17,14 +18,12 @@ const fmt = (v) => (Number.isFinite(v) ? `${v.toFixed(0)} ms` : "—");
 const text = (id, value) => {
   $(id).textContent = value;
 };
-const labels = () => [
-  "DETERMINISTIC",
-  runner.mode === "CONTROL"
-    ? "DETERMINISTIC"
-    : runner.mode === "MOCK"
+const labels = () =>
+  ["alpha", "bravo"].map((id) =>
+    runner.controller(id) === "MOCK_DELAYED_RULES"
       ? "MOCK RULES"
-      : "JEV",
-];
+      : runner.controller(id),
+  );
 
 function panel(id) {
   const detailWasOpen = $(id).querySelector("details")?.open;
@@ -32,7 +31,12 @@ function panel(id) {
     snapshot = tacticalSnapshot(runner.sim, id),
     self = snapshot.self,
     e = runner.latest[id];
-  const pending = id === "bravo" && runner.pending;
+  const pending = runner.pending?.event.ship === id && runner.pending;
+  const track = snapshot.opponent.track;
+  const estimated = (v, degrees = false) =>
+    v === null
+      ? "unknown"
+      : `~${(degrees ? (v * 180) / Math.PI : v).toFixed(1)}${degrees ? "°" : ""}`;
   const turrets = self.turrets
     .map(
       (t, i) =>
@@ -46,7 +50,7 @@ function panel(id) {
         .join(" · ")
     : "No provider confidence";
   $(id).innerHTML =
-    `<div class="panel-heading"><span>${id === "alpha" ? "α" : "β"} ${labels()[id === "alpha" ? 0 : 1]}</span><small>SIDE ${s.startingSide}</small></div>
+    `<div class="panel-heading"><span>${id === "alpha" ? "α" : "β"} ${labels()[id === "alpha" ? 0 : 1]}</span><small>${s.startingSide} / ${s.rngRole}</small></div>
     <div class="hp">${s.hp.toFixed(0)} <small>/ ${C.hp} HP</small></div><meter min="0" max="${C.hp}" value="${s.hp}"></meter>
     <div class="intent">${s.action.maneuver} · ${s.action.fire}</div>
     <div class="panel-grid"><span>${s.action.shell} → ${s.action.aimZone}</span><span>${self.loadedGunsBearing}/4 loaded & bearing</span>
@@ -55,7 +59,13 @@ function panel(id) {
     <span class="wide">Engine ${fmt(s.modules.engine)} · Helm ${fmt(s.modules.steering)}</span>
     <span class="wide muted">Damage ${s.stats.damageDealt.toFixed(0)} · Hits ${s.stats.hits} / Shots ${s.stats.shots}</span>
     <span class="wide muted">Bounce ${s.stats.RICOCHET} · Pen ${s.stats.PENETRATION} · Cit ${s.stats.CITADEL}</span></div>
-    <div class="turrets">${turrets}</div><div class="state-line ${pending ? "pending" : ""}">${pending ? `● ${pending.ready ? "DELAY INJECTION" : "REQUEST PENDING"} · holding intent<br>Snapshot ${fmt(runner.sim.timeMs - pending.event.snapshot.timeMs)} old` : e?.ruleId ? `${e.ruleId}<br>Computed in ${e.computationLatencyMs.toFixed(3)} ms` : e ? `APPLIED · snapshot ${fmt(e.stateAgeAtApplyMs)} old<br>${confidence}` : "Awaiting first decision"}</div>`;
+    <div class="turrets">${turrets}</div>
+    <div class="track-panel"><b>OPPONENT TRACK · ${track.quality}</b><br>
+    Est. speed ${estimated(track.estimatedSpeed)} u/s · heading ${estimated(track.estimatedHeading, true)}<br>
+    ${track.turnTrend.replaceAll("_", " ")} · ${track.speedTrend.replaceAll("_", " ")}<br>
+    Age ${fmt(track.trackAgeMs)} · confidence ${(track.confidence.overall * 100).toFixed(0)}%<br>
+    Position uncertainty ±${track.positionUncertainty.toFixed(1)} u · ${track.maturity}</div>
+    <div class="state-line ${pending ? "pending" : ""}">${pending ? `● ${pending.ready ? "DELAY INJECTION" : "REQUEST PENDING"} · holding intent<br>Snapshot ${fmt(runner.sim.timeMs - pending.event.snapshot.timeMs)} old` : e?.ruleId ? `${e.ruleId}<br>Computed in ${e.computationLatencyMs.toFixed(3)} ms` : e ? `APPLIED · snapshot ${fmt(e.stateAgeAtApplyMs)} old<br>${runner.mode === "MOCK" ? "MOCK one-hot fixture · " : ""}${confidence}` : "Awaiting first decision"}</div>`;
   if (e?.answers) {
     const detail = document.createElement("details"),
       summary = document.createElement("summary"),
@@ -82,7 +92,8 @@ function refresh() {
     `${sim.status !== "RUNNING" ? sim.status : running ? "RUNNING" : "READY"} / ${runner.mode} / SEED ${sim.seed} / +${runner.injectedDelayMs} MS`,
   );
   $("legend-bravo").lastChild.textContent = ` β ${labels()[1]}`;
-  const latest = runner.latest.bravo;
+  $("legend-alpha").lastChild.textContent = ` α ${labels()[0]}`;
+  const latest = runner.latest[runner.contenderShip];
   text("provider-ms", fmt(latest?.providerLatencyMs));
   text(
     "age-ms",
@@ -92,7 +103,7 @@ function refresh() {
   text(
     "timing-title",
     runner.pending
-      ? `The world is moving. ${labels()[1]} is waiting.`
+      ? `The world is moving. ${runner.controller(runner.contenderShip)} is waiting.`
       : "Decisions share a 250 ms cadence.",
   );
   text(
@@ -127,7 +138,7 @@ function showResult() {
       ? `INVALID · ${s.invalidReason}`
       : s.winner === "DRAW"
         ? "DRAW · time limit or simultaneous destruction"
-        : `${s.winner === "alpha" ? "α DETERMINISTIC" : `β ${labels()[1]}`} wins`,
+        : `${s.winner === "alpha" ? `α ${labels()[0]}` : `β ${labels()[1]}`} wins`,
   );
   text(
     "result-detail",
@@ -172,6 +183,8 @@ function start() {
   runner = new DuelRunner({
     seed: Number($("seed").value),
     swapped: $("swapped").checked,
+    contenderShip: $("contender").value,
+    scenario: $("scenario").value,
     mode,
     injectedDelayMs: Number($("delay").value),
     requestDecision:
@@ -240,6 +253,10 @@ $("csv").onclick = () => {
       "winner",
       "durationMs",
       "side",
+      "shipId",
+      "rngRole",
+      "scenario",
+      "contenderShip",
       "controller",
       "hp",
       "damage",
@@ -254,6 +271,10 @@ $("csv").onclick = () => {
       s.winner,
       s.battleDurationMs,
       p.startingSide,
+      p.id,
+      p.rngRole,
+      s.scenario,
+      s.contenderShip,
       p.controller,
       p.endingHp,
       p.damageDealt,
@@ -314,6 +335,7 @@ window.render_game_to_text = () =>
     pending: !!runner.pending,
     missed: runner.missed,
     ships: runner.sim.ships.map((s) => ({
+      geometryLabel: "GROUND TRUTH - ANALYSIS ONLY",
       id: s.id,
       x: s.x,
       y: s.y,
@@ -351,6 +373,12 @@ if (verify)
       b.y = 500;
       a.heading = 0;
       b.heading = name === "bow" ? Math.PI : Math.PI / 2;
+      runner.sim.trackers = {
+        alpha: new TargetTracker(),
+        bravo: new TargetTracker(),
+      };
+      runner.sim.trackResearch = [];
+      runner.sim.observeTargets();
       for (const s of [a, b])
         s.turrets.forEach((t, i) => {
           t.angle = s.heading + (i < 2 ? 0 : Math.PI);

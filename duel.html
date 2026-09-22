@@ -54,6 +54,19 @@
         <label class="check"
           ><input type="checkbox" id="swapped" /> Swap starting sides</label
         >
+        <label
+          >JEV / MOCK ROLE<select id="contender">
+            <option value="bravo">β / RNG R1</option>
+            <option value="alpha">α / RNG R0</option>
+          </select></label
+        >
+        <label
+          >START GEOMETRY<select id="scenario">
+            <option value="HEAD_ON">Head-on</option>
+            <option value="PARALLEL">Parallel</option>
+            <option value="CROSSING">Crossing</option>
+          </select></label
+        >
         <button type="submit" class="primary" id="run">Run duel ↗</button>
         <button type="button" id="stop" disabled>Stop</button>
       </form>
@@ -79,12 +92,12 @@
           </div>
           <canvas
             id="arena"
-            width="1600"
-            height="1000"
+            width="2200"
+            height="1400"
             aria-label="Top-down duel arena; detailed ship state is available in the observer panels"
           ></canvas>
           <div class="legend">
-            <span><i class="blue"></i> α DETERMINISTIC</span
+            <span id="legend-alpha"><i class="blue"></i> α DETERMINISTIC</span
             ><span id="legend-bravo"
               ><i class="orange"></i> β DETERMINISTIC</span
             ><span>AP <b class="ap">━</b> &nbsp; HE <b class="he">━</b></span>

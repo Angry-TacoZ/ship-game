@@ -72,6 +72,7 @@ p {
 }
 .controls {
   display: flex;
+  flex-wrap: wrap;
   gap: 14px;
   align-items: end;
   background: var(--panel);
@@ -189,7 +190,7 @@ canvas {
   display: block;
   width: 100%;
   height: auto;
-  aspect-ratio: 1.6;
+  aspect-ratio: 11 / 7;
 }
 i {
   display: inline-block;
@@ -326,6 +327,19 @@ meter::-webkit-meter-optimum-value {
     11px/1.7 ui-monospace,
     monospace;
   min-height: 45px;
+}
+.track-panel {
+  margin: 10px 0;
+  padding: 9px 0;
+  border-top: 1px solid var(--line);
+  font:
+    11px/1.7 ui-monospace,
+    monospace;
+  color: var(--muted);
+}
+.track-panel b {
+  color: var(--lime);
+  font-weight: 500;
 }
 .pending {
   color: var(--orange);

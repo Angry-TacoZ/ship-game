@@ -37,6 +37,13 @@ export async function verifyDuel(browser, baseUrl, output) {
   const mirrored = await page.evaluate(() => window.__duel.runner.summary());
   assert.equal(mirrored.winner, control.winner);
   assert.equal(mirrored.ships[0].startingSide, "B");
+  assert.ok(
+    await page
+      .locator("#alpha .track-panel")
+      .innerText()
+      .then((t) => t.includes("Est. speed")),
+  );
+  assert.equal(await page.locator("#arena").evaluate((c) => c.width), 2200);
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "Export JSON", exact: true }).click();
   const download = await downloadPromise;
@@ -74,6 +81,22 @@ export async function verifyDuel(browser, baseUrl, output) {
   const csvPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "Summary CSV", exact: true }).click();
   assert.ok((await csvPromise).suggestedFilename().endsWith(".csv"));
+  await page.selectOption("#contender", "alpha");
+  await page.selectOption("#scenario", "CROSSING");
+  await page.locator("#restart").click();
+  await page.waitForFunction(
+    () => !!window.__duel.runner.latest.alpha?.answers,
+  );
+  assert.equal(
+    await page.evaluate(() => window.__duel.runner.latest.alpha.controller),
+    "MOCK_DELAYED_RULES",
+  );
+  assert.match(await page.locator("#legend-alpha").innerText(), /MOCK/);
+  assert.equal(
+    await page.evaluate(() => window.__duel.runner.summary().scenario),
+    "CROSSING",
+  );
+  await page.locator("#stop").click();
   assert.deepEqual(errors, []);
   await page.close();
   // Exercise the LIVE browser path with an intercepted local proxy, never the provider.
@@ -89,7 +112,7 @@ export async function verifyDuel(browser, baseUrl, output) {
   await live.route("**/api/jev/decision", async (route) => {
     const { providerRequest } = await import("../server/jev.js");
     const { deterministicPolicy } = await import("../duel/policy.js");
-    const {planKey} = await import('../duel/config.js');
+    const { planKey } = await import("../duel/config.js");
     const snapshot = route.request().postDataJSON().snapshot;
     const action = deterministicPolicy(snapshot).action,
       questions = providerRequest(snapshot, "jev-1.13.0").questions;
@@ -138,6 +161,17 @@ export async function verifyDuel(browser, baseUrl, output) {
     path: `${output}/duel-jev-applied.png`,
     fullPage: true,
   });
+  await live.locator("#stop").click();
+  await live.selectOption("#contender", "alpha");
+  await live.locator("#restart").click();
+  await live.waitForFunction(
+    () => !!window.__duel.runner.latest.alpha?.answers,
+  );
+  assert.equal(
+    await live.evaluate(() => window.__duel.runner.latest.alpha.controller),
+    "JEV",
+  );
+  assert.match(await live.locator("#legend-alpha").innerText(), /JEV/);
   assert.equal(
     await live.evaluate(() => {
       try {

@@ -42,10 +42,15 @@ export function renderArena(
   ctx.lineTo(b.x, b.y);
   ctx.stroke();
   ctx.setLineDash([]);
-  const range = Math.hypot(a.x - b.x, a.y - b.y);
+  const tracked = sim.trackers.alpha.estimate(sim.timeMs).position;
+  const range = Math.hypot(a.x - tracked.x, a.y - tracked.y);
   ctx.textAlign = "center";
   ctx.fillStyle = "#b1c4c6";
-  ctx.fillText(`${range.toFixed(0)} u`, (a.x + b.x) / 2, (a.y + b.y) / 2 - 18);
+  ctx.fillText(
+    `~${range.toFixed(0)} u tracked`,
+    (a.x + b.x) / 2,
+    (a.y + b.y) / 2 - 18,
+  );
   for (const s of sim.ships) {
     const index = s.id === "alpha" ? 0 : 1,
       color = index === 0 ? "#71d4eb" : "#f4b77d";
