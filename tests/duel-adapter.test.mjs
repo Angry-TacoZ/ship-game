@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { DuelRunner } from "../duel/runner.js";
 import { DuelSimulation, tacticalSnapshot } from "../duel/simulation.js";
-import { ACTIONS, CONFIG as C, INITIAL_ACTION } from "../duel/config.js";
+import { PLANS, planKey, CONFIG as C, INITIAL_ACTION } from "../duel/config.js";
 import { validateSnapshot, parseProviderResponse } from "../duel/contract.js";
 import { providerRequest, requestJev } from "../server/jev.js";
 import { createBenchmarkServer } from "../server/benchmark.mjs";
@@ -23,14 +23,14 @@ function providerBody() {
     model: "jev-1.13.0",
     usage: { input_tokens: 100, output_tokens: 20 },
     answers: Object.fromEntries(
-      Object.entries(ACTIONS).map(([key, options]) => [
+      Object.entries({plan:Object.keys(PLANS)}).map(([key, options]) => [
         key,
         {
           type: "choice",
-          choice: action[key],
+          choice: planKey(action),
           confidence: 0.9,
           probabilities: Object.fromEntries(
-            options.map((o) => [o, o === action[key] ? 1 : 0]),
+            options.map((o) => [o, o === planKey(action) ? 1 : 0]),
           ),
         },
       ]),
@@ -38,12 +38,13 @@ function providerBody() {
   };
 }
 
-test("official Choice contract batches four independent questions", () => {
+test("official Choice contract selects one coherent plan within the 255-option limit", () => {
   const req = providerRequest(snapshot(), "jev-1.13.0");
-  assert.equal(Object.keys(req.questions).length, 4);
+  assert.equal(Object.keys(req.questions).length, 1);
+  assert.equal(Object.keys(PLANS).length, 108);
   for (const [key, q] of Object.entries(req.questions)) {
     assert.equal(q.type, "choice");
-    assert.deepEqual(Object.keys(q.criteria), ACTIONS[key]);
+    assert.deepEqual(Object.keys(q.criteria), Object.keys(PLANS));
   }
   assert.deepEqual(req.state.observation, snapshot());
   assert.deepEqual(parseProviderResponse(providerBody()).action, action);
@@ -64,10 +65,10 @@ test("snapshot validation rejects hidden fields, invalid enums, overlong text an
 });
 test("provider rejects missing or malformed choices, probabilities, confidence and usage", () => {
   for (const mutate of [
-    (b) => delete b.answers.fire,
-    (b) => (b.answers.shell.choice = "TORPEDO"),
-    (b) => (b.answers.shell.confidence = 2),
-    (b) => (b.answers.fire.probabilities.FIRE = NaN),
+    (b) => delete b.answers.plan,
+    (b) => (b.answers.plan.choice = "TORPEDO"),
+    (b) => (b.answers.plan.confidence = 2),
+    (b) => (b.answers.plan.probabilities[planKey(action)] = NaN),
     (b) => (b.usage.input_tokens = -1),
   ]) {
     const b = providerBody();

@@ -1,4 +1,4 @@
-import { ACTIONS, CONFIG as C } from "../duel/config.js";
+import { PLANS, CONFIG as C } from "../duel/config.js";
 import { parseProviderResponse, validateSnapshot } from "../duel/contract.js";
 
 // Contract checked against https://docs.typesafe.ai/api and /primitives/choice, 2026-09-22.
@@ -26,16 +26,12 @@ const descriptions = {
   STERN: "Aim rear quarter; may impair steering.",
 };
 export function providerRequest(snapshot, model) {
-  const questions = Object.fromEntries(
-    Object.entries(ACTIONS).map(([key, options]) => [
-      key,
-      {
-        type: "choice",
-        instructions: `Choose the ${key} action to maximize survival and damage efficiency in this duel. All four choices are independent and based on the same observation.`,
-        criteria: Object.fromEntries(options.map((o) => [o, descriptions[o]])),
-      },
-    ]),
-  );
+  const questions = {plan: {
+    type:'choice',
+    instructions:'Choose one coherent tactical plan to maximize survival and effective damage. Evaluate maneuver, firing intent, ammunition and target zone together, accounting for estimated track uncertainty and decision latency. HOLD_FIRE still pre-aims the chosen zone. FIRE persists until replaced, but shared physical constraints gate each turret.',
+    criteria:Object.fromEntries(Object.entries(PLANS).map(([key,a])=>[key,
+      `${descriptions[a.maneuver]} ${a.fire === 'FIRE' ? 'Fire' : 'Hold fire; pre-aim'} ${a.shell} at ${a.aimZone}.`])),
+  }};
   return {
     model,
     state: {
@@ -46,6 +42,9 @@ export function providerRequest(snapshot, model) {
         arena: { width: C.width, height: C.height },
         objective: "Sink opponent before 120 seconds; timeout is a draw.",
         equalShips: true,
+        ammunition: {AP:descriptions.AP, HE:descriptions.HE},
+        zones: {BOW:descriptions.BOW, MIDSHIPS:descriptions.MIDSHIPS, STERN:descriptions.STERN},
+        tracking: 'Only opponent.track is known motion: noisy 10Hz observations, smoothed velocity and hull heading. Hull heading differs from direction of travel. Confidence is estimator quality, not probability of a hit. Shared gun director uses the same current estimated track. Unknown speed or LOST track prevents fire; targets can turn during shell flight.',
         maxSpeed: C.maxSpeed,
         maxRange: C.maxRange,
         reloadMs: C.reloadMs,

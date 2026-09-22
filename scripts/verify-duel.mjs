@@ -89,6 +89,7 @@ export async function verifyDuel(browser, baseUrl, output) {
   await live.route("**/api/jev/decision", async (route) => {
     const { providerRequest } = await import("../server/jev.js");
     const { deterministicPolicy } = await import("../duel/policy.js");
+    const {planKey} = await import('../duel/config.js');
     const snapshot = route.request().postDataJSON().snapshot;
     const action = deterministicPolicy(snapshot).action,
       questions = providerRequest(snapshot, "jev-1.13.0").questions;
@@ -103,12 +104,12 @@ export async function verifyDuel(browser, baseUrl, output) {
             key,
             {
               type: "choice",
-              choice: action[key],
+              choice: planKey(action),
               confidence: 1,
               probabilities: Object.fromEntries(
                 Object.keys(q.criteria).map((o) => [
                   o,
-                  o === action[key] ? 1 : 0,
+                  o === planKey(action) ? 1 : 0,
                 ]),
               ),
             },

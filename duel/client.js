@@ -1,5 +1,6 @@
 import { deterministicPolicy } from "./policy.js";
 import { parseProviderResponse } from "./contract.js";
+import { PLANS, planKey } from './config.js';
 
 export function liveAdapter(token) {
   return async (snapshot, { signal }) => {
@@ -44,11 +45,11 @@ export function mockAdapter(delayMs = 180) {
       const timer = setTimeout(() => {
         signal.removeEventListener("abort", abort);
         resolve({
-          action: result.action,
-          model: "MOCK_RULES_NOT_JEV",
+          ...parseProviderResponse({model:'MOCK_RULES_NOT_JEV', answers:{plan:{
+            type:'choice',choice:planKey(result.action),confidence:1,
+            probabilities:Object.fromEntries(Object.keys(PLANS).map(key=>[key,key===planKey(result.action)?1:0])),
+          }}}),
           providerLatencyMs: performance.now() - start,
-          usage: {},
-          answers: null,
         });
       }, delayMs);
       if (signal.aborted) abort();

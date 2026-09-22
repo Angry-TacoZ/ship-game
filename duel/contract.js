@@ -1,4 +1,4 @@
-import { ACTIONS, CONFIG as C, validateAction } from "./config.js";
+import { ACTIONS, PLANS, CONFIG as C, validateAction } from "./config.js";
 import { DuelSimulation, tacticalSnapshot } from "./simulation.js";
 import { TURN_TRENDS, SPEED_TRENDS, TRACK_QUALITIES } from './tracking.js';
 
@@ -93,9 +93,9 @@ export function parseProviderResponse(body) {
     !/^[a-zA-Z0-9_.-]{1,80}$/.test(body.model)
   )
     throw new Error("Malformed provider response");
-  const action = {},
-    answers = {};
-  for (const [key, options] of Object.entries(ACTIONS)) {
+  const answers = {};
+  if (!body.answers || Object.keys(body.answers).length !== 1) throw new Error('Malformed provider response');
+  for (const [key, options] of Object.entries({plan:Object.keys(PLANS)})) {
     const a = body.answers?.[key];
     if (
       a?.type !== "choice" ||
@@ -115,7 +115,6 @@ export function parseProviderResponse(body) {
         0.02
     )
       throw new Error("Malformed provider response");
-    action[key] = a.choice;
     answers[key] = {
       type: "choice",
       choice: a.choice,
@@ -132,5 +131,5 @@ export function parseProviderResponse(body) {
         throw new Error("Malformed provider usage");
       usage[key] = body.usage[key];
     }
-  return { action: validateAction(action), answers, model: body.model, usage };
+  return { action: validateAction(PLANS[answers.plan.choice]), answers, model: body.model, usage };
 }

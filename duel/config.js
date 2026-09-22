@@ -85,6 +85,12 @@ export const INITIAL_ACTION = Object.freeze({
   shell: "AP",
   aimZone: "MIDSHIPS",
 });
+// One coherent bounded Choice, retaining every existing action (including
+// pre-aiming a selected zone/ammunition while holding fire): 9*2*2*3 = 108.
+export const PLANS = Object.freeze(Object.fromEntries(ACTIONS.maneuver.flatMap(maneuver =>
+  ACTIONS.fire.flatMap(fire => ACTIONS.shell.flatMap(shell => ACTIONS.aimZone.map(aimZone =>
+    [`${maneuver}__${fire}__${shell}__${aimZone}`, Object.freeze({maneuver,fire,shell,aimZone})]))))));
+export const planKey = action => `${action.maneuver}__${action.fire}__${action.shell}__${action.aimZone}`;
 export const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
 export const angleDelta = (from, to) =>
   Math.atan2(Math.sin(to - from), Math.cos(to - from));
