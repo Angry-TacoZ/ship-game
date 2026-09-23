@@ -99,13 +99,18 @@ export function aimSolution(ship, track, index, zone) {
   const time = positive.length
     ? Math.min(...positive)
     : Math.sqrt(c) / C.shellSpeed;
-  return {
-    origin,
-    usable: track.quality !== "LOST" && track.estimatedSpeed !== null,
-    flightTimeSeconds: time,
-    angle: Math.atan2(dy + target.vy * time, dx + target.vx * time),
-    range: Math.sqrt(c),
-  };
+    return {
+      origin,
+      usable: track.quality !== "LOST" && track.estimatedSpeed !== null,
+      flightTimeSeconds: time,
+      angle: Math.atan2(dy + target.vy * time, dx + target.vx * time),
+      range: Math.sqrt(c),
+      estimatedTargetPosition: { ...track.position },
+      predictedInterceptPoint: {
+        x: aim.x + target.vx * time,
+        y: aim.y + target.vy * time,
+      },
+    };
 }
 
 export function resolveImpact(

@@ -10,6 +10,7 @@ export const publicFiles = [
   "duel/config.js",
   "duel/combat.js",
   "duel/tracking.js",
+  "duel/observation.js",
   "duel/simulation.js",
   "duel/policy.js",
   "duel/runner.js",
