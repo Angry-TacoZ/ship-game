@@ -565,6 +565,10 @@ const ISLAND_LAYERS = [
     { r: 0.58, color: '#347b49', light: '#55a05a', shadow: '#1e513b', noise: 0.08 },
     { r: 0.4, color: '#24543d', light: '#3e7b4d', shadow: '#15382d', noise: 0.06 }
 ];
+const ISLAND_SHADOW_OFFSET = { x: 20, y: 28 };
+const ISLAND_RENDER_PADDING = 12;
+const ISLAND_LAYER_STROKE_WIDTHS = [6, 6, 8, 8, 8];
+const ISLAND_MAX_STROKE_PADDING = Math.max(...ISLAND_LAYER_STROKE_WIDTHS) / 2;
 
 function islandLayerRadius(isl, angle, layer) {
     const noise = (Math.sin(5 * angle + isl.seed1) + Math.cos(7 * angle + isl.seed2)) * layer.noise;
@@ -585,23 +589,82 @@ function shipIslandClearance(entity) {
     return Math.hypot(forwardExtent, hull.width);
 }
 
-function traceIslandLayer(context, isl, radius, center, layer) {
+function traceIslandLayer(context, isl, radius, centerX, centerY, layer) {
     context.beginPath();
     for (let a = 0; a <= Math.PI * 2 + 0.1; a += Math.PI / 64) {
         const r = islandLayerRadius(isl, a, layer);
-        const px = center + Math.cos(a) * r;
-        const py = center + Math.sin(a) * r;
+        const px = centerX + Math.cos(a) * r;
+        const py = centerY + Math.sin(a) * r;
         if (a === 0) context.moveTo(px, py); else context.lineTo(px, py);
     }
     context.closePath();
 }
 
-function islandLayerGradient(context, center, radius, layer) {
-    const gradient = context.createLinearGradient(center - radius, center - radius, center + radius, center + radius);
+function islandLayerGradient(context, centerX, centerY, radius, layer) {
+    const gradient = context.createLinearGradient(centerX - radius, centerY - radius, centerX + radius, centerY + radius);
     gradient.addColorStop(0, layer.light);
     gradient.addColorStop(0.52, layer.color);
     gradient.addColorStop(1, layer.shadow);
     return gradient;
+}
+
+function includeIslandRenderCircle(bounds, x, y, radius) {
+    bounds.minX = Math.min(bounds.minX, x - radius);
+    bounds.maxX = Math.max(bounds.maxX, x + radius);
+    bounds.minY = Math.min(bounds.minY, y - radius);
+    bounds.maxY = Math.max(bounds.maxY, y + radius);
+}
+
+function getIslandRenderGeometry(isl) {
+    const radius = isl.radius;
+    const outerLayer = ISLAND_LAYERS[0];
+    // The two noise terms can add up to twice the layer's noise amplitude.
+    const maximumShorelineRadius = radius * outerLayer.r * (1 + 2 * outerLayer.noise);
+    const renderBounds = {
+        minX: -maximumShorelineRadius - ISLAND_MAX_STROKE_PADDING,
+        maxX: maximumShorelineRadius + ISLAND_MAX_STROKE_PADDING,
+        minY: -maximumShorelineRadius - ISLAND_MAX_STROKE_PADDING,
+        maxY: maximumShorelineRadius + ISLAND_MAX_STROKE_PADDING
+    };
+    includeIslandRenderCircle(renderBounds, ISLAND_SHADOW_OFFSET.x, ISLAND_SHADOW_OFFSET.y, maximumShorelineRadius);
+    isl.trees.forEach(tree => includeIslandRenderCircle(renderBounds, tree.x, tree.y, tree.size * 1.12 + 9));
+    isl.hills.forEach(hill => includeIslandRenderCircle(renderBounds, hill.x, hill.y, Math.hypot(hill.width, hill.height) + 32));
+    isl.rocks.forEach(rock => includeIslandRenderCircle(renderBounds, rock.x, rock.y, rock.size * 1.5 + 26));
+
+    const centerX = Math.ceil(ISLAND_RENDER_PADDING - renderBounds.minX);
+    const centerY = Math.ceil(ISLAND_RENDER_PADDING - renderBounds.minY);
+    const bufferWidth = Math.ceil(centerX + renderBounds.maxX + ISLAND_RENDER_PADDING);
+    const bufferHeight = Math.ceil(centerY + renderBounds.maxY + ISLAND_RENDER_PADDING);
+
+    return {
+        bufferWidth,
+        bufferHeight,
+        centerX,
+        centerY,
+        maximumShorelineRadius,
+        minRenderX: centerX + renderBounds.minX,
+        maxRenderX: centerX + renderBounds.maxX,
+        minRenderY: centerY + renderBounds.minY,
+        maxRenderY: centerY + renderBounds.maxY,
+        padding: ISLAND_RENDER_PADDING,
+        strokePadding: ISLAND_MAX_STROKE_PADDING,
+        shadowOffset: { ...ISLAND_SHADOW_OFFSET }
+    };
+}
+
+function buildIslandBuffer(isl) {
+    const geometry = getIslandRenderGeometry(isl);
+    isl.buffer = document.createElement('canvas');
+    isl.buffer.width = geometry.bufferWidth;
+    isl.buffer.height = geometry.bufferHeight;
+    isl.bufferCenterX = geometry.centerX;
+    isl.bufferCenterY = geometry.centerY;
+    isl.renderGeometry = geometry;
+    renderIslandToBuffer(isl.buffer.getContext('2d'), isl, isl.radius, geometry.centerX, geometry.centerY);
+}
+
+function islandBufferWorldPosition(isl) {
+    return { x: isl.x - isl.bufferCenterX, y: isl.y - isl.bufferCenterY };
 }
 
 function resolveIslandCollision(entity) {
@@ -946,27 +1009,25 @@ function initIslands() {
             const rr = radius * (0.2 + Math.random() * 0.5), ra = Math.random() * Math.PI * 2;
             isl.rocks.push({ x: Math.cos(ra) * rr, y: Math.sin(ra) * rr, size: 9 + Math.random() * 15, angle: Math.random() * Math.PI });
         }
-        isl.buffer = document.createElement('canvas'); const bSize = radius * 2.5;
-        isl.buffer.width = bSize; isl.buffer.height = bSize;
-        renderIslandToBuffer(isl.buffer.getContext('2d'), isl, radius, bSize/2);
+        buildIslandBuffer(isl);
         islands.push(isl);
     }
 }
 
-function renderIslandToBuffer(bCtx, isl, radius, center) {
+function renderIslandToBuffer(bCtx, isl, radius, centerX, centerY) {
     bCtx.save();
-    bCtx.translate(20, 28);
-    traceIslandLayer(bCtx, isl, radius, center, ISLAND_LAYERS[0]);
+    bCtx.translate(ISLAND_SHADOW_OFFSET.x, ISLAND_SHADOW_OFFSET.y);
+    traceIslandLayer(bCtx, isl, radius, centerX, centerY, ISLAND_LAYERS[0]);
     bCtx.fillStyle = 'rgba(3, 15, 22, 0.38)';
     bCtx.fill();
     bCtx.restore();
 
     ISLAND_LAYERS.forEach((layer, index) => {
-        traceIslandLayer(bCtx, isl, radius, center, layer);
-        bCtx.fillStyle = islandLayerGradient(bCtx, center, radius, layer);
+        traceIslandLayer(bCtx, isl, radius, centerX, centerY, layer);
+        bCtx.fillStyle = islandLayerGradient(bCtx, centerX, centerY, radius, layer);
         bCtx.fill();
         bCtx.strokeStyle = index === 0 ? 'rgba(70, 38, 24, 0.85)' : 'rgba(11, 41, 31, 0.58)';
-        bCtx.lineWidth = index < 2 ? 6 : 8;
+        bCtx.lineWidth = ISLAND_LAYER_STROKE_WIDTHS[index];
         bCtx.stroke();
     });
 
@@ -976,20 +1037,20 @@ function renderIslandToBuffer(bCtx, isl, radius, center) {
     bCtx.lineWidth = 7;
     [0.49, 0.32].forEach(scale => {
         const contour = { ...ISLAND_LAYERS[ISLAND_LAYERS.length - 1], r: scale, noise: 0.045 };
-        traceIslandLayer(bCtx, isl, radius, center, contour);
+        traceIslandLayer(bCtx, isl, radius, centerX, centerY, contour);
         bCtx.stroke();
     });
     bCtx.globalAlpha = 0.32;
     bCtx.strokeStyle = '#b8d77b';
     bCtx.lineWidth = 3;
     const highlight = { ...ISLAND_LAYERS[2], r: 0.78, noise: 0.06 };
-    traceIslandLayer(bCtx, isl, radius, center, highlight);
+    traceIslandLayer(bCtx, isl, radius, centerX, centerY, highlight);
     bCtx.stroke();
     bCtx.restore();
 
     isl.hills.forEach(hill => {
         bCtx.save();
-        bCtx.translate(center + hill.x + 10, center + hill.y + 14);
+        bCtx.translate(centerX + hill.x + 10, centerY + hill.y + 14);
         bCtx.rotate(hill.angle);
         bCtx.fillStyle = 'rgba(12, 38, 29, 0.28)';
         bCtx.beginPath(); bCtx.ellipse(0, 0, hill.width * 1.08, hill.height * 0.92, 0, 0, Math.PI * 2); bCtx.fill();
@@ -1001,7 +1062,7 @@ function renderIslandToBuffer(bCtx, isl, radius, center) {
 
     isl.rocks.forEach(rock => {
         bCtx.save();
-        bCtx.translate(center + rock.x + 7, center + rock.y + 9);
+        bCtx.translate(centerX + rock.x + 7, centerY + rock.y + 9);
         bCtx.rotate(rock.angle);
         bCtx.fillStyle = 'rgba(8, 25, 25, 0.35)';
         bCtx.beginPath(); bCtx.ellipse(0, 0, rock.size * 1.2, rock.size * 0.72, 0, 0, Math.PI * 2); bCtx.fill();
@@ -1014,10 +1075,10 @@ function renderIslandToBuffer(bCtx, isl, radius, center) {
     });
 
     isl.trees.forEach(tree => {
-        bCtx.fillStyle = 'rgba(0,0,0,0.25)'; bCtx.beginPath(); bCtx.arc(center + tree.x + 6, center + tree.y + 6, tree.size, 0, Math.PI * 2); bCtx.fill();
-        bCtx.fillStyle = tree.color; bCtx.beginPath(); bCtx.arc(center + tree.x, center + tree.y, tree.size, 0, Math.PI * 2); bCtx.fill();
-        bCtx.fillStyle = 'rgba(255,255,255,0.2)'; bCtx.beginPath(); bCtx.arc(center + tree.x - tree.size*0.3, center + tree.y - tree.size*0.3, tree.size*0.42, 0, Math.PI * 2); bCtx.fill();
-        bCtx.fillStyle = 'rgba(5, 35, 27, 0.25)'; bCtx.beginPath(); bCtx.arc(center + tree.x + tree.size*0.25, center + tree.y + tree.size*0.3, tree.size*0.72, 0, Math.PI * 2); bCtx.fill();
+        bCtx.fillStyle = 'rgba(0,0,0,0.25)'; bCtx.beginPath(); bCtx.arc(centerX + tree.x + 6, centerY + tree.y + 6, tree.size, 0, Math.PI * 2); bCtx.fill();
+        bCtx.fillStyle = tree.color; bCtx.beginPath(); bCtx.arc(centerX + tree.x, centerY + tree.y, tree.size, 0, Math.PI * 2); bCtx.fill();
+        bCtx.fillStyle = 'rgba(255,255,255,0.2)'; bCtx.beginPath(); bCtx.arc(centerX + tree.x - tree.size*0.3, centerY + tree.y - tree.size*0.3, tree.size*0.42, 0, Math.PI * 2); bCtx.fill();
+        bCtx.fillStyle = 'rgba(5, 35, 27, 0.25)'; bCtx.beginPath(); bCtx.arc(centerX + tree.x + tree.size*0.25, centerY + tree.y + tree.size*0.3, tree.size*0.72, 0, Math.PI * 2); bCtx.fill();
     });
 }
 
@@ -1065,7 +1126,10 @@ function gameLoop(timestamp) {
         }
         ctx.fillStyle = '#0c4a6e'; ctx.fillRect(0, 0, width, height);
         ctx.save(); ctx.translate(width/2, height/2); ctx.scale(zoom, zoom); ctx.translate(-player.x, -player.y);
-        islands.forEach(isl => { ctx.drawImage(isl.buffer, isl.x - (isl.radius*1.25), isl.y - (isl.radius*1.25)); });
+        islands.forEach(isl => {
+            const drawPosition = islandBufferWorldPosition(isl);
+            ctx.drawImage(isl.buffer, drawPosition.x, drawPosition.y);
+        });
         particles.forEach(p => p.draw());
         enemies.forEach(e => e.draw()); if (player) player.draw(); drops.forEach(d => d.draw()); projectiles.forEach(p => p.draw());
         damagePopups.forEach(p => { ctx.save(); ctx.globalAlpha = p.life / 1000; ctx.font = 'bold 32px monospace'; ctx.textAlign = 'center'; ctx.fillStyle = p.color; ctx.fillText(p.text, p.x, p.y); ctx.restore(); });
@@ -1206,16 +1270,75 @@ function startGame() {
             }
             const originalIslands = islands;
             islands = [fixture];
-            const bufferSize = fixture.radius * 2.5;
-            fixture.buffer = document.createElement('canvas');
-            fixture.buffer.width = bufferSize;
-            fixture.buffer.height = bufferSize;
-            renderIslandToBuffer(fixture.buffer.getContext('2d'), fixture, fixture.radius, bufferSize / 2);
+            buildIslandBuffer(fixture);
+            const geometry = fixture.renderGeometry;
+            let sampledMinX = Infinity, sampledMaxX = -Infinity, sampledMinY = Infinity, sampledMaxY = -Infinity;
+            let shorelineMatchesCollision = true;
+            for (let angle = 0; angle <= Math.PI * 2 + 0.1; angle += Math.PI / 64) {
+                const shorelineRadius = outerIslandShorelineRadius(fixture, angle);
+                const renderedOuterRadius = islandLayerRadius(fixture, angle, ISLAND_LAYERS[0]);
+                shorelineMatchesCollision &&= Math.abs(renderedOuterRadius - shorelineRadius) < 1e-9;
+                const shorelineX = Math.cos(angle) * shorelineRadius;
+                const shorelineY = Math.sin(angle) * shorelineRadius;
+                sampledMinX = Math.min(sampledMinX, shorelineX - geometry.strokePadding, shorelineX + geometry.shadowOffset.x);
+                sampledMaxX = Math.max(sampledMaxX, shorelineX + geometry.strokePadding, shorelineX + geometry.shadowOffset.x);
+                sampledMinY = Math.min(sampledMinY, shorelineY - geometry.strokePadding, shorelineY + geometry.shadowOffset.y);
+                sampledMaxY = Math.max(sampledMaxY, shorelineY + geometry.strokePadding, shorelineY + geometry.shadowOffset.y);
+            }
+            const bufferRenderBounds = {
+                minRenderX: geometry.centerX + sampledMinX,
+                maxRenderX: geometry.centerX + sampledMaxX,
+                minRenderY: geometry.centerY + sampledMinY,
+                maxRenderY: geometry.centerY + sampledMaxY
+            };
+            const bufferPadding = {
+                left: bufferRenderBounds.minRenderX,
+                right: geometry.bufferWidth - bufferRenderBounds.maxRenderX,
+                top: bufferRenderBounds.minRenderY,
+                bottom: geometry.bufferHeight - bufferRenderBounds.maxRenderY
+            };
+            const drawPosition = islandBufferWorldPosition(fixture);
+            const worldCenterPreserved = Math.abs(drawPosition.x + geometry.centerX - fixture.x) < 0.001 && Math.abs(drawPosition.y + geometry.centerY - fixture.y) < 0.001;
             player.x = -680; player.y = 0; player.vx = 0; player.vy = 0;
             enemies = enemies.slice(0, 1);
             enemies.forEach(enemy => { enemy.x = 3000; enemy.y = 3000; });
             gameState = 'PAUSED';
-            return { layerCount: ISLAND_LAYERS.length, hillCount: fixture.hills.length, rockCount: fixture.rocks.length, treeCount: fixture.trees.length, shorelineRadius: outerIslandShorelineRadius(fixture, 0), originalIslandCount: originalIslands.length };
+            return {
+                layerCount: ISLAND_LAYERS.length,
+                hillCount: fixture.hills.length,
+                rockCount: fixture.rocks.length,
+                treeCount: fixture.trees.length,
+                shorelineRadius: outerIslandShorelineRadius(fixture, 0),
+                bufferWidth: fixture.buffer.width,
+                bufferHeight: fixture.buffer.height,
+                centerX: geometry.centerX,
+                centerY: geometry.centerY,
+                minRenderX: bufferRenderBounds.minRenderX,
+                maxRenderX: bufferRenderBounds.maxRenderX,
+                minRenderY: bufferRenderBounds.minRenderY,
+                maxRenderY: bufferRenderBounds.maxRenderY,
+                theoreticalMinRenderX: geometry.minRenderX,
+                theoreticalMaxRenderX: geometry.maxRenderX,
+                theoreticalMinRenderY: geometry.minRenderY,
+                theoreticalMaxRenderY: geometry.maxRenderY,
+                theoreticalPadding: {
+                    left: geometry.minRenderX,
+                    right: geometry.bufferWidth - geometry.maxRenderX,
+                    top: geometry.minRenderY,
+                    bottom: geometry.bufferHeight - geometry.maxRenderY
+                },
+                maximumShorelineRadius: geometry.maximumShorelineRadius,
+                shadowOffset: geometry.shadowOffset,
+                strokePadding: geometry.strokePadding,
+                requestedPadding: geometry.padding,
+                bufferPadding,
+                boundsFit: bufferRenderBounds.minRenderX >= 0 && bufferRenderBounds.minRenderY >= 0 && bufferRenderBounds.maxRenderX <= geometry.bufferWidth && bufferRenderBounds.maxRenderY <= geometry.bufferHeight,
+                positivePadding: Object.values(bufferPadding).every(padding => padding > 0),
+                theoreticalBoundsFit: geometry.minRenderX >= 0 && geometry.minRenderY >= 0 && geometry.maxRenderX <= geometry.bufferWidth && geometry.maxRenderY <= geometry.bufferHeight,
+                shorelineMatchesCollision,
+                worldCenterPreserved,
+                originalIslandCount: originalIslands.length
+            };
         };
     }
     if (new URLSearchParams(window.location.search).has('verify-enemy-orbit')) {

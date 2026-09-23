@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { chromium, devices } from "playwright";
 
 const host = "127.0.0.1";
@@ -92,11 +92,43 @@ async function verifyIslandDetail(browser) {
   await page.getByRole("button", { name: /US NAVY/ }).click();
   await page.getByText("BATTLESHIP", { exact: true }).waitFor();
   const result = await page.evaluate(() => window.__verifyIslandDetail?.());
-  if (!result || result.layerCount < 5 || result.hillCount < 1 || result.rockCount < 1 || result.treeCount < 1 || result.shorelineRadius <= 0) {
+  if (
+    !result ||
+    result.layerCount < 5 ||
+    result.hillCount < 1 ||
+    result.rockCount < 1 ||
+    result.treeCount < 1 ||
+    result.shorelineRadius <= 0 ||
+    !result.boundsFit ||
+    !result.theoreticalBoundsFit ||
+    !result.positivePadding ||
+    !result.worldCenterPreserved ||
+    !result.shorelineMatchesCollision ||
+    Object.values(result.theoreticalPadding ?? {}).length !== 4 ||
+    Object.values(result.theoreticalPadding ?? {}).some((padding) => padding < result.requestedPadding) ||
+    result.minRenderX < 0 ||
+    result.minRenderY < 0 ||
+    result.maxRenderX > result.bufferWidth ||
+    result.maxRenderY > result.bufferHeight
+  ) {
     throw new Error(`Island detail verification failed: ${JSON.stringify(result)}`);
   }
+  await page.waitForFunction(() => {
+    const probeX = Math.round(innerWidth / 2 + (0 - player.x) * zoom);
+    const probeY = Math.round(innerHeight / 2 + (0 - player.y) * zoom);
+    const pixel = ctx.getImageData(probeX, probeY, 1, 1).data;
+    return pixel[1] > pixel[2];
+  });
+  const visibleTerrainPixel = await page.evaluate(() => {
+    const probeX = Math.round(innerWidth / 2 + (0 - player.x) * zoom);
+    const probeY = Math.round(innerHeight / 2 + (0 - player.y) * zoom);
+    return [...ctx.getImageData(probeX, probeY, 1, 1).data];
+  });
+  result.visibleTerrainPixel = visibleTerrainPixel;
+  console.log(`ISLAND DETAIL BOUNDS: ${JSON.stringify(result)}`);
   await page.waitForTimeout(250);
-  await page.screenshot({ path: `${outputDirectory}/island-detail.png`, fullPage: true });
+  const canvasPngBase64 = await page.locator("#gameCanvas").evaluate((canvas) => canvas.toDataURL("image/png").split(",")[1]);
+  await writeFile(`${outputDirectory}/island-detail.png`, Buffer.from(canvasPngBase64, "base64"));
   await page.close();
 }
 
