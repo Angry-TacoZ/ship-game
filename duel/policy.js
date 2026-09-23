@@ -6,7 +6,10 @@ export function deterministicPolicy(snapshot) {
   const side = s.relativeBearing < 0 ? "PORT" : "STARBOARD";
   let maneuver, ruleId;
   const loaded = s.turrets.filter((t) => t.loaded && !t.impairedMs).length;
-  const safeReload = e.estimatedReloadMs !== null && e.estimatedReloadMs > 2800;
+  const safeReload =
+    e.enemyFire.status === "RELOADING" &&
+    e.enemyFire.lastSalvoObservedAgeMs !== null &&
+    e.enemyFire.lastSalvoObservedAgeMs < C.reloadMs - 2800;
   if (s.boundaryDistance < 130) {
     const bearing = s.heading + s.relativeBearing,
       center = s.heading + s.centerBearing;
@@ -49,7 +52,7 @@ export function deterministicPolicy(snapshot) {
   const aimZone =
     shell === "AP"
       ? "MIDSHIPS"
-      : e.visibleModules.steering <= 0 && e.track.estimatedSpeed > 25
+      : !e.visibleModules.steeringImpaired && e.track.estimatedSpeed > 25
         ? "STERN"
         : "BOW";
   return {

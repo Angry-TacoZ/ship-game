@@ -154,15 +154,6 @@ export function renderArena(
     ctx.font = "15px ui-monospace, monospace";
     ctx.fillStyle = "#d1dcd8";
     ctx.fillText(`${s.hp.toFixed(0)} HP`, s.x, s.y - 103);
-    const modules = [
-      s.modules.engine > 0 ? "ENGINE" : null,
-      s.modules.steering > 0 ? "STEERING" : null,
-      s.turrets.some((t) => t.impaired > 0) ? "TURRET" : null,
-    ].filter(Boolean);
-    if (modules.length) {
-      ctx.fillStyle = "#ffd49d";
-      ctx.fillText(`${modules.join(" / ")} IMPAIRED`, s.x, s.y + 105);
-    }
   }
   for (const p of sim.projectiles) {
     ctx.strokeStyle = p.type === "AP" ? "#ffe3a0" : "#ff997a";

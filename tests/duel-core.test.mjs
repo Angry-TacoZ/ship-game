@@ -183,7 +183,7 @@ test("tactical rules use canonical observation and produce bounded actions", () 
   const d = deterministicPolicy(structuredClone(snapshot));
   assert.ok(d.ruleId);
   validateAction(d.action);
-  assert.equal(snapshot.opponent.estimatedReloadMs, null);
+  assert.equal(snapshot.opponent.enemyFire.status, "NO_OBSERVED_SALVO");
   assert.equal(snapshot.opponent.turrets, undefined);
   assert.throws(() => validateAction({ ...fire, velocity: 2 }));
 });

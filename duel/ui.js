@@ -3,7 +3,7 @@ import { DuelRunner } from "./runner.js";
 import { liveAdapter, mockAdapter } from "./client.js";
 import { tacticalSnapshot } from "./simulation.js";
 import { renderArena } from "./render.js";
-import { TargetTracker } from "./tracking.js";
+import { OpponentObservationState } from "./observation.js";
 
 const $ = (id) => document.getElementById(id),
   canvas = $("arena");
@@ -56,7 +56,7 @@ function panel(id) {
     <div class="panel-grid"><span>${s.action.shell} → ${s.action.aimZone}</span><span>${self.loadedGunsBearing}/4 loaded & bearing</span>
     <span>Range ${self.range.toFixed(0)} u</span><span>Aspect ${self.aspect.toFixed(0)}°</span>
     <span class="wide muted">B ${s.zones.BOW.toFixed(0)} · M ${s.zones.MIDSHIPS.toFixed(0)} · S ${s.zones.STERN.toFixed(0)}</span>
-    <span class="wide">Engine ${fmt(s.modules.engine)} · Helm ${fmt(s.modules.steering)}</span>
+    <span class="wide">Own modules: engine ${self.modules.engine > 0 ? "IMPAIRED" : "OK"} · helm ${self.modules.steering > 0 ? "IMPAIRED" : "OK"}</span>
     <span class="wide muted">Damage ${s.stats.damageDealt.toFixed(0)} · Hits ${s.stats.hits} / Shots ${s.stats.shots}</span>
     <span class="wide muted">Bounce ${s.stats.RICOCHET} · Pen ${s.stats.PENETRATION} · Cit ${s.stats.CITADEL}</span></div>
     <div class="turrets">${turrets}</div>
@@ -64,7 +64,9 @@ function panel(id) {
     Est. speed ${estimated(track.estimatedSpeed)} u/s · heading ${estimated(track.estimatedHeading, true)}<br>
     ${track.turnTrend.replaceAll("_", " ")} · ${track.speedTrend.replaceAll("_", " ")}<br>
     Age ${fmt(track.trackAgeMs)} · confidence ${(track.confidence.overall * 100).toFixed(0)}%<br>
-    Position uncertainty ±${track.positionUncertainty.toFixed(1)} u · ${track.maturity}</div>
+    Position uncertainty ±${track.positionUncertainty.toFixed(1)} u · ${track.maturity}<br>
+    <b>OBSERVED DAMAGE</b> · Engine ${snapshot.opponent.visibleModules.engineImpaired ? "IMPAIRED" : "OK"} · Steering ${snapshot.opponent.visibleModules.steeringImpaired ? "IMPAIRED" : "OK"} · Forward battery ${snapshot.opponent.visibleModules.forwardTurretImpaired ? "IMPAIRED" : "OK"}<br>
+    <b>ENEMY FIRE</b> · ${snapshot.opponent.enemyFire.status.replaceAll("_", " ")} · Last salvo observed ${snapshot.opponent.enemyFire.lastSalvoObservedAgeMs === null ? "never" : `${(snapshot.opponent.enemyFire.lastSalvoObservedAgeMs / 1000).toFixed(1)} s ago`}</div>
     <div class="state-line ${pending ? "pending" : ""}">${pending ? `● ${pending.ready ? "DELAY INJECTION" : "REQUEST PENDING"} · holding intent<br>Snapshot ${fmt(runner.sim.timeMs - pending.event.snapshot.timeMs)} old` : e?.ruleId ? `${e.ruleId}<br>Computed in ${e.computationLatencyMs.toFixed(3)} ms` : e ? `APPLIED · snapshot ${fmt(e.stateAgeAtApplyMs)} old<br>${runner.mode === "MOCK" ? "MOCK one-hot fixture · " : ""}${confidence}` : "Awaiting first decision"}</div>`;
   if (e?.answers) {
     const detail = document.createElement("details"),
@@ -373,12 +375,18 @@ if (verify)
       b.y = 500;
       a.heading = 0;
       b.heading = name === "bow" ? Math.PI : Math.PI / 2;
-      runner.sim.trackers = {
-        alpha: new TargetTracker(),
-        bravo: new TargetTracker(),
+      runner.sim.opponentObservations = {
+        alpha: new OpponentObservationState(),
+        bravo: new OpponentObservationState(),
       };
+      runner.sim.trackers = Object.fromEntries(
+        Object.entries(runner.sim.opponentObservations).map(([id, state]) => [
+          id,
+          state.tracker,
+        ]),
+      );
       runner.sim.trackResearch = [];
-      runner.sim.observeTargets();
+      runner.sim.observeOpponents();
       for (const s of [a, b])
         s.turrets.forEach((t, i) => {
           t.angle = s.heading + (i < 2 ? 0 : Math.PI);
@@ -401,6 +409,10 @@ if (verify)
           point: { x: b.x, y: b.y + (1 - i) * 43 },
           moduleEffect: i === 0 ? "TURRET" : i === 1 ? "ENGINE" : "STEERING",
         }));
+      }
+      if (name === "modules") {
+        runner.sim.timeMs += C.observationIntervalMs;
+        runner.sim.observeOpponents();
       }
       renderArena(canvas, runner.sim, { labels: labels(), arcs: true });
       refresh();

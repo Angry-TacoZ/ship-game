@@ -40,7 +40,7 @@ function check(value, expected) {
 export function validateSnapshot(value) {
   check(value, template);
   if (
-    value.schemaVersion !== 2 ||
+    value.schemaVersion !== 3 ||
     value.timeMs < 0 ||
     value.timeMs > C.timeLimitMs ||
     !ACTIONS.maneuver.includes(value.self.intent) ||
@@ -104,11 +104,17 @@ export function validateSnapshot(value) {
     (track.quality === "LOST" && track.confidence.overall !== 0)
   )
     throw new Error("Invalid observation");
-  for (const time of [
-    value.opponent.lastObservedSalvoMs,
-    value.opponent.estimatedReloadMs,
-  ])
-    if (time !== null && time < 0) throw new Error("Invalid observation");
+  if (
+    !["NO_OBSERVED_SALVO", "RELOADING", "LIKELY_READY"].includes(
+      value.opponent.enemyFire.status,
+    ) ||
+    (value.opponent.enemyFire.lastSalvoObservedAgeMs !== null &&
+      value.opponent.enemyFire.lastSalvoObservedAgeMs < 0) ||
+    Object.values(value.opponent.visibleModules).some(
+      (impaired) => typeof impaired !== "boolean",
+    )
+  )
+    throw new Error("Invalid observation");
   for (const t of value.self.turrets)
     if (
       t.reloadPct < 0 ||
