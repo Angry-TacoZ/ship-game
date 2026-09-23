@@ -11,8 +11,14 @@ export async function verifyDuel(browser, baseUrl, output) {
   await page.waitForFunction(() => !!window.__duel);
   for (const scene of ["bow", "broadside", "modules"]) {
     await page.evaluate((name) => window.__duel.scene(name), scene);
+    if (scene === "modules") {
+      const panel = await page.locator("#alpha .track-panel").innerText();
+      assert.match(panel, /OBSERVED DAMAGE.*Engine IMPAIRED.*Steering IMPAIRED/s);
+      assert.match(panel, /ENEMY FIRE.*NO OBSERVED SALVO/);
+      assert.doesNotMatch(panel, /(?:Engine|Steering|battery):?\s*\d+\s*ms/i);
+    }
     await page.screenshot({
-      path: `${output}/duel-${scene}.png`,
+      path: `${output}/${scene === "modules" ? "duel-observed-modules" : `duel-${scene}`}.png`,
       fullPage: true,
     });
   }

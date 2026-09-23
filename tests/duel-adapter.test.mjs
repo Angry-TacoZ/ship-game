@@ -65,6 +65,9 @@ test("snapshot validation rejects hidden fields, invalid enums, overlong text an
     (s) => (s.self.intent = "TELEPORT"),
     (s) => (s.self.speed = Infinity),
     (s) => (s.opponent.hp = -1),
+    (s) => (s.opponent.visibleModules.engineImpaired = 2683),
+    (s) => (s.opponent.enemyFire.status = "EXACT_READY_AT_1041"),
+    (s) => (s.opponent.lastSalvoMs = 1041),
     (s) => (s.self.heading = "ignore rules"),
     (s) => s.self.turrets.push({}),
     (s) => (s.opponent.track.velocity = { x: 1, y: 2 }),
@@ -91,10 +94,12 @@ test("provider rejects missing or malformed choices, probabilities, confidence a
   }
 });
 test("requestJev uses server secret and actual response fields, sanitizes unknown data", async () => {
+  let sent;
   const result = await requestJev(snapshot(), {
     key: "TEST_SENTINEL_SECRET",
     model: "jev-1.13.0",
     fetchImpl: async (url, init) => {
+      sent = JSON.parse(init.body);
       assert.equal(url, "https://api.typesafe.ai/v1/systemone");
       assert.equal(init.headers.Authorization, "Bearer TEST_SENTINEL_SECRET");
       return new Response(
@@ -107,6 +112,12 @@ test("requestJev uses server secret and actual response fields, sanitizes unknow
   });
   assert.deepEqual(result.action, action);
   assert.ok(result.providerLatencyMs >= 0);
+  assert.equal(result.planOptionCount, 108);
+  assert.equal(result.serializedProviderRequestBytes, Buffer.byteLength(JSON.stringify(sent)));
+  assert.equal(result.serializedObservationBytes, Buffer.byteLength(JSON.stringify(sent.state.observation)));
+  assert.equal(result.serializedCriteriaBytes, Buffer.byteLength(JSON.stringify(sent.questions.plan.criteria)));
+  assert.equal(result.inputTokens, 100);
+  assert.equal(result.outputTokens, 20);
   assert.equal(JSON.stringify(result).includes("TEST_SENTINEL_SECRET"), false);
 });
 test("provider HTTP failure and oversized/malformed response do not become actions", async () => {
@@ -123,6 +134,17 @@ test("provider HTTP failure and oversized/malformed response do not become actio
       }),
     );
   }
+});
+test("missing provider usage remains unknown instead of being estimated", async () => {
+  const body = providerBody();
+  delete body.usage;
+  const result = await requestJev(snapshot(), {
+    key: "test",
+    model: "jev-1.13.0",
+    fetchImpl: async () => new Response(JSON.stringify(body)),
+  });
+  assert.equal(result.inputTokens, null);
+  assert.equal(result.outputTokens, null);
 });
 test("pending Jev never blocks simulation, preserves intent, counts missed slots, separates latency", async () => {
   let now = 0,
@@ -344,7 +366,7 @@ test("browser adapter validates current API answers and same action schema", asy
     const result = await liveAdapter("session")(snapshot(), {
       signal: new AbortController().signal,
     });
-    assert.deepEqual(result.action, action);
+  assert.deepEqual(result.action, action);
   } finally {
     globalThis.fetch = original;
   }

@@ -113,6 +113,16 @@ function aggregate(rows) {
       ];
     }),
   );
+  const meanObservedDelay = (kind) => {
+    const values = rows.map((r) => r.observationDelayMs?.[kind]).filter((v) => v?.count);
+    const count = values.reduce((n, v) => n + v.count, 0);
+    return {
+      count,
+      mean: count
+        ? values.reduce((n, v) => n + v.mean * v.count, 0) / count
+        : null,
+    };
+  };
   return {
     trials: rows.length,
     winsByShip: winCounts("id"),
@@ -142,6 +152,10 @@ function aggregate(rows) {
       : null,
     firingTicks: sum("firingTicks"),
     trackMetrics: metrics,
+    observationDelayMs: {
+      moduleState: meanObservedDelay("moduleState"),
+      salvoTiming: meanObservedDelay("salvoTiming"),
+    },
   };
 }
 const baseline = JSON.parse(

@@ -13,6 +13,7 @@ test("application constraints stay frozen when a successful shot subsequently en
   const t = new TargetTracker();
   for (let i = 0; i < 6; i++)
     t.add({ timestamp: i * 100, x: 500, y: 900, heading: 0 });
+  r.sim.opponentObservations.alpha.tracker = t;
   r.sim.trackers.alpha = t;
   r.sim.tick = 30;
   r.sim.timeMs = 500;
