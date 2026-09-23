@@ -53,3 +53,16 @@ Original prompt: Recover the playable browser naval game and continue its develo
 
 - Candidate tactical plans now remain candidates until the steering cooldown permits committing them; active movement uses only the committed mode and crossing side.
 - Added regression coverage for forward hull/velocity alignment, hard-turn braking, cooldown-held CROSS behavior, delayed REPOSITION, and urgent SEPARATE interruption.
+
+## Island elevation and detail pass
+
+- Added a focused `codex/island-elevation` branch change for layered island terrain: directional gradients, a cast terrain shadow, contour/cliff accents, low hills, rocks, and more readable tree shading.
+- Kept `ISLAND_LAYERS[0]` as the rendered/collision shoreline source and left ship clearance calculations unchanged.
+- Added `?verify-island-detail` fixture coverage and an `output/playwright/island-detail.png` screenshot so the visual change is deterministic and inspectable.
+- `npm run verify` passes after the island render change.
+
+## PR #9 render-buffer clipping follow-up
+
+- Replaced the fixed `radius * 2.5` backing canvas with bounds derived from the `1.30 * radius` theoretical outer shoreline, maximum layer stroke, `(20, 28)` terrain shadow, tree/hill/rock extents, and 12px per-edge safety padding.
+- Stored per-island buffer centers and draw buffers at `island position - buffer center`, preserving the world-space shoreline center.
+- Extended `?verify-island-detail` to assert sampled and theoretical render bounds, positive edge padding, world-center placement, and the shared rendered/collision shoreline formula for the required radius-500 seeded fixture.
