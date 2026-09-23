@@ -1,6 +1,19 @@
 Original prompt: Recover the playable browser naval game and continue its development.
 
+## AI Duel Lab experiment
+
+- Revision of existing draft PR #10 (no merge/deploy/paid calls): eight-sample noisy observation tracks, observation-bound policy/director/helm, named independent RNG purposes and four role/side conditions, larger arena/range-sensitive spread, application-versus-persistent constraints, joint 108-plan Choice, and track/role/scenario observer controls. AP/HE competence thresholds retained. 41 Node tests and full original/duel browser verifier pass. Expanded controls: 32 seeds × 3 geometries × 4 conditions = 384, with 192 repeat/reverse checks; all 96 groups pass. Detailed current evidence and caveats are in AI-DUEL-EXPERIMENT.md. Earlier bullets below describe the original pre-revision baseline.
+
+- Request: compare Jev tactical decisions with deterministic rules under real decision latency, using identical ships and observable outcomes. Source baseline is main `d73662a`; experimental branch is `codex/ai-duel-lab`.
+- Architecture inspected: legacy committed enemy steering, fixed tick, turrets, projectile radius tests and verifier routes. New duel uses separate ES modules; legacy page only gains a mode link.
+- Common combat and policy checks pass: swept oriented hull hits, AP/HE aspect rules, actual turret arcs, module impairment, seeded repeatability, five fixed mirrored seeds and reversed update order.
+- Official TypeSafe HTTP/Choice/model documentation checked on 2026-09-22. Four independent Choice questions use one request. Proxy is local-only, env-key protected, explicitly enabled, bounded and mocked in verification.
+- Readiness and final verification evidence are recorded in `AI-DUEL-EXPERIMENT.md`; no real Jev benchmark conclusions are justified without live data.
+- Final local checks: 28 Node tests, original-game and duel desktop/keyboard/touch browser paths, ten offline control trials (five mirrored pairs), static package allowlist/secret scan and web-game client screenshots passed. No API requests were made to TypeSafe.
+
 ## Current state
+
+- PR #10 revision: controller identity now crosses explicit R0/R1 named RNG streams independently of side. Shared 10 Hz observations feed an eight-sample tracker; both the 4 Hz policy snapshot and 60 Hz gun/helm control now use that track, never true enemy motion. Target acquisition, stale/lost tracks, isolated information and intercept errors have regression tests. Existing asynchronous request behavior remains intact.
 
 - The recovered static game is prepared for GitHub Pages.
 - `npm run verify` checks desktop pointer and mobile touch startup/gameplay paths and saves ignored screenshots in `output/playwright/`.

@@ -4,6 +4,10 @@ Recovered from James Lane's [shared Gemini Canvas](https://gemini.google.com/sha
 
 ## Play locally
 
+### AI Duel Lab (experimental)
+
+Run `npm ci` then `npm start` and open `http://127.0.0.1:8765/duel.html` for a separate controlled 1v1 experiment. The default deterministic control and labeled mock latency mode require no API key. [AI-DUEL-EXPERIMENT.md](AI-DUEL-EXPERIMENT.md) covers shared combat, fairness controls, telemetry, verification, limitations and the local-only Jev setup. The original Skirmish mode remains below.
+
 From this folder, run:
 
 ```powershell
