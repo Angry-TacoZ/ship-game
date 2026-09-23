@@ -29,7 +29,26 @@ export function liveAdapter(token) {
     const parsed = parseProviderResponse(body);
     if (!Number.isFinite(body.providerLatencyMs) || body.providerLatencyMs < 0)
       throw new Error("Invalid latency");
-    return { ...parsed, providerLatencyMs: body.providerLatencyMs };
+    for (const key of [
+      "planOptionCount",
+      "serializedProviderRequestBytes",
+      "serializedObservationBytes",
+      "serializedCriteriaBytes",
+      "inputTokens",
+      "outputTokens",
+    ])
+      if (body[key] != null && (!Number.isSafeInteger(body[key]) || body[key] < 0))
+        throw new Error("Invalid provider telemetry");
+    return {
+      ...parsed,
+      providerLatencyMs: body.providerLatencyMs,
+      planOptionCount: body.planOptionCount ?? null,
+      serializedProviderRequestBytes: body.serializedProviderRequestBytes ?? null,
+      serializedObservationBytes: body.serializedObservationBytes ?? null,
+      serializedCriteriaBytes: body.serializedCriteriaBytes ?? null,
+      inputTokens: body.inputTokens ?? null,
+      outputTokens: body.outputTokens ?? null,
+    };
   };
 }
 // A delayed copy of the rule policy, explicitly NOT Jev and never benchmark eligible.

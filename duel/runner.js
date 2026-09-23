@@ -94,7 +94,10 @@ export class DuelRunner {
     const ship = this.sim.ships.find((s) => s.id === id),
       current = tacticalSnapshot(this.sim, id);
     const action = validateAction(result.action);
-    ship.commit(action);
+    ship.commit(action, {
+      decisionAtMs: event.snapshot.timeMs,
+      appliedAtMs: this.sim.timeMs,
+    });
     const constraintsAtApply = ship.actionConstraints(current.opponent.track);
     Object.assign(event, result, {
       action,
@@ -178,6 +181,12 @@ export class DuelRunner {
           model: result.model,
           usage: result.usage,
           answers: result.answers,
+          planOptionCount: result.planOptionCount ?? null,
+          serializedProviderRequestBytes: result.serializedProviderRequestBytes ?? null,
+          serializedObservationBytes: result.serializedObservationBytes ?? null,
+          serializedCriteriaBytes: result.serializedCriteriaBytes ?? null,
+          inputTokens: result.inputTokens ?? result.usage?.input_tokens ?? null,
+          outputTokens: result.outputTokens ?? result.usage?.output_tokens ?? null,
         });
         if (
           this.disposed ||
@@ -383,6 +392,23 @@ export class DuelRunner {
       providerLatencyMs: statistics(
         jev.map((e) => e.providerLatencyMs).filter(Number.isFinite),
       ),
+      jevPayload: Object.fromEntries(
+        [
+          "planOptionCount",
+          "serializedProviderRequestBytes",
+          "serializedObservationBytes",
+          "serializedCriteriaBytes",
+          "inputTokens",
+          "outputTokens",
+        ].map((key) => [
+          key,
+          statistics(jev.map((e) => e[key]).filter(Number.isFinite)),
+        ]),
+      ),
+      observationDelayMs: {
+        moduleState: statistics(this.sim.observationMetrics.moduleStateDelayMs),
+        salvoTiming: statistics(this.sim.observationMetrics.salvoTimingDelayMs),
+      },
       stateAgeAtApplyMs: statistics(applied.map((e) => e.stateAgeAtApplyMs)),
       totalDecisionDelayMs: statistics(
         applied.map((e) => e.totalDecisionDelayMs),
@@ -422,6 +448,7 @@ export class DuelRunner {
       impacts: this.sim.impacts,
       frames: this.sim.frames,
       trackResearch: this.sim.trackResearch,
+      projectileResearch: this.sim.projectileResearch,
     };
   }
 }

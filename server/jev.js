@@ -76,6 +76,20 @@ export async function requestJev(
   { key, model, fetchImpl = fetch, signal },
 ) {
   const started = performance.now();
+  const payload = providerRequest(snapshot, model),
+    serialized = JSON.stringify(payload),
+    payloadTelemetry = {
+      planOptionCount: Object.keys(payload.questions.plan.criteria).length,
+      serializedProviderRequestBytes: Buffer.byteLength(serialized, "utf8"),
+      serializedObservationBytes: Buffer.byteLength(
+        JSON.stringify(payload.state.observation),
+        "utf8",
+      ),
+      serializedCriteriaBytes: Buffer.byteLength(
+        JSON.stringify(payload.questions.plan.criteria),
+        "utf8",
+      ),
+    };
   const response = await fetchImpl(PROVIDER_URL, {
     method: "POST",
     redirect: "error",
@@ -84,7 +98,7 @@ export async function requestJev(
       "Content-Type": "application/json",
       Authorization: `Bearer ${key}`,
     },
-    body: JSON.stringify(providerRequest(snapshot, model)),
+    body: serialized,
   });
   if (!response.ok) {
     await response.body?.cancel();
@@ -112,5 +126,11 @@ export async function requestJev(
   } catch {
     throw new Error("Malformed provider response");
   }
-  return { ...result, providerLatencyMs: performance.now() - started };
+  return {
+    ...result,
+    ...payloadTelemetry,
+    inputTokens: result.usage.input_tokens ?? null,
+    outputTokens: result.usage.output_tokens ?? null,
+    providerLatencyMs: performance.now() - started,
+  };
 }
