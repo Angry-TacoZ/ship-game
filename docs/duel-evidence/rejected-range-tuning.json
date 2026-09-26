@@ -1,0 +1,31 @@
+{
+  "date": "2026-09-26",
+  "purpose": "Symmetric range sensitivity check prompted by the external review; retained as a rejected experiment, not benchmark evidence.",
+  "command": "npm.cmd run verify:controls",
+  "parameter": "startingSeparation",
+  "acceptedBaselineUnits": 1100,
+  "rejectedCandidateUnits": 1400,
+  "candidate": {
+    "conditions": 384,
+    "seedScenarioGroups": 96,
+    "passedGroups": 61,
+    "physicalSymmetryFailures": 35,
+    "failuresByScenario": {
+      "HEAD_ON": 35,
+      "PARALLEL": 0,
+      "CROSSING": 0
+    },
+    "roleParityFailures": 0,
+    "repeatabilityFailures": 0,
+    "reverseUpdateOrderFailures": 0,
+    "shots": 21588,
+    "hits": 19416,
+    "allLaunchedHitRate": 0.8993885491939967,
+    "scenarioAllLaunchedHitRate": {
+      "HEAD_ON": 0.8697433096668488,
+      "PARALLEL": 0.9083333333333333,
+      "CROSSING": 0.9202014846235419
+    }
+  },
+  "disposition": "Rejected. Physical symmetry did not pass, and the aggregate all-launched hit rate increased rather than improving prediction sensitivity. The accepted configuration remains at 1100 units."
+}

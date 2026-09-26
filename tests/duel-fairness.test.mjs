@@ -109,7 +109,7 @@ test("module hit effects use configured zone consequences and recover", () => {
   assert.equal(target.modules.steering, 0);
   assert.equal(target.turrets[0].impaired, 0);
 });
-test("transparent baseline chooses AP broadside, HE angled, separation, approach and defensive reload", () => {
+test("transparent baseline chooses AP/HE and repositions defensively without ready guns", () => {
   const s = tacticalSnapshot(new DuelSimulation(), "alpha");
   s.self.range = 1500;
   assert.equal(deterministicPolicy(s).ruleId, "APPROACH_RANGE");

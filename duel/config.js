@@ -1,7 +1,7 @@
 // Every physical constant is shared by both contestants. Distances are world units;
 // time is seconds in physics and milliseconds in decisions/telemetry.
 export const CONFIG = Object.freeze({
-  version: "ai-duel-v2",
+  version: "ai-duel-v3",
   dt: 1 / 60,
   width: 2200,
   height: 1400,

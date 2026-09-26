@@ -40,7 +40,7 @@ function check(value, expected) {
 export function validateSnapshot(value) {
   check(value, template);
   if (
-    value.schemaVersion !== 3 ||
+    value.schemaVersion !== 4 ||
     value.timeMs < 0 ||
     value.timeMs > C.timeLimitMs ||
     !ACTIONS.maneuver.includes(value.self.intent) ||
@@ -104,10 +104,15 @@ export function validateSnapshot(value) {
     (track.quality === "LOST" && track.confidence.overall !== 0)
   )
     throw new Error("Invalid observation");
+  const salvoAge = value.opponent.enemyFire.lastSalvoObservedAgeMs,
+    expectedFireStatus =
+      salvoAge === null
+        ? "NO_OBSERVED_SALVO"
+        : salvoAge < C.reloadMs
+          ? "RECENT_FIRE_OBSERVED"
+          : "OLD_FIRE_OBSERVATION";
   if (
-    !["NO_OBSERVED_SALVO", "RELOADING", "LIKELY_READY"].includes(
-      value.opponent.enemyFire.status,
-    ) ||
+    value.opponent.enemyFire.status !== expectedFireStatus ||
     (value.opponent.enemyFire.lastSalvoObservedAgeMs !== null &&
       value.opponent.enemyFire.lastSalvoObservedAgeMs < 0) ||
     Object.values(value.opponent.visibleModules).some(

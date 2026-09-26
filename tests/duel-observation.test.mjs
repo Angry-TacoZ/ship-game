@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { DuelSimulation, tacticalSnapshot } from "../duel/simulation.js";
 import { DuelRunner } from "../duel/runner.js";
 import { providerRequest } from "../server/jev.js";
+import { validateSnapshot } from "../duel/contract.js";
 
 test("opponent module changes remain hidden until the next observation sample", () => {
   const sim = new DuelSimulation(),
@@ -45,13 +46,33 @@ test("a salvo fired between samples is timestamped only when observed", () => {
   sim.observeOpponents();
   const visible = tacticalSnapshot(sim, "alpha");
   assert.deepEqual(visible.opponent.enemyFire, {
-    status: "RELOADING",
+    status: "RECENT_FIRE_OBSERVED",
     lastSalvoObservedAgeMs: 0,
   });
+  assert.equal(validateSnapshot(visible).schemaVersion, 4);
+  assert.throws(
+    () =>
+      validateSnapshot({
+        ...visible,
+        opponent: {
+          ...visible.opponent,
+          enemyFire: {
+            status: "OLD_FIRE_OBSERVATION",
+            lastSalvoObservedAgeMs: 0,
+          },
+        },
+      }),
+    /Invalid observation/,
+  );
   assert.equal(sim.observationMetrics.salvoTimingDelayMs.at(-1), 59);
   assert.equal("lastSalvoMs" in visible.opponent, false);
   sim.timeMs += 5000;
   assert.equal(tacticalSnapshot(sim, "alpha").opponent.enemyFire.lastSalvoObservedAgeMs, 5000);
+  sim.timeMs += 1500;
+  assert.deepEqual(tacticalSnapshot(sim, "alpha").opponent.enemyFire, {
+    status: "OLD_FIRE_OBSERVATION",
+    lastSalvoObservedAgeMs: 6500,
+  });
 });
 
 test("Jev payload has only sampled opponent state; truth remains export-only research", () => {

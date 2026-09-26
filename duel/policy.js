@@ -6,10 +6,6 @@ export function deterministicPolicy(snapshot) {
   const side = s.relativeBearing < 0 ? "PORT" : "STARBOARD";
   let maneuver, ruleId;
   const loaded = s.turrets.filter((t) => t.loaded && !t.impairedMs).length;
-  const safeReload =
-    e.enemyFire.status === "RELOADING" &&
-    e.enemyFire.lastSalvoObservedAgeMs !== null &&
-    e.enemyFire.lastSalvoObservedAgeMs < C.reloadMs - 2800;
   if (s.boundaryDistance < 130) {
     const bearing = s.heading + s.relativeBearing,
       center = s.heading + s.centerBearing;
@@ -40,7 +36,7 @@ export function deterministicPolicy(snapshot) {
     ruleId = "KITE_DAMAGED";
   } else if (
     loaded >= 2 &&
-    (safeReload || e.track.aspectEstimate >= 60 || loaded === 4)
+    (e.track.aspectEstimate >= 60 || loaded === 4)
   ) {
     maneuver = `BROADSIDE_${side}`;
     ruleId = "CROSS_FIRE_WINDOW";

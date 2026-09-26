@@ -65,7 +65,7 @@ export function providerRequest(snapshot, model) {
           "Aspect 0 means bow/stern-on, 90 broadside. AP auto-ricochets at aspect <=30, probabilistic from 30 to45. Broadside midships permits citadels.",
         moduleDurationMs: C.moduleDurationMs,
         timing:
-          "Decisions at 250ms opportunities. World keeps moving during requests; previous intent remains committed. Enemy reload is an estimate from last observed firing, not hidden turret timers.",
+          "Decisions at 250ms opportunities. World keeps moving during requests; previous intent remains committed. Enemy fire only reports a recent or old observed salvo and its observation age. One observed turret firing does not reveal other mounts' reload or readiness.",
       },
     },
     questions,

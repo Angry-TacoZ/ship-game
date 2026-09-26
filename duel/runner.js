@@ -1,5 +1,9 @@
 import { CONFIG as C, validateAction } from "./config.js";
-import { DuelSimulation, tacticalSnapshot } from "./simulation.js";
+import {
+  DuelSimulation,
+  currentFiringReadiness,
+  tacticalSnapshot,
+} from "./simulation.js";
 import { deterministicPolicy } from "./policy.js";
 
 const statistics = (values) => {
@@ -59,10 +63,17 @@ export class DuelRunner {
     this.failures = 0;
     this.requests = 0;
     this.latest = {};
+    this.decisionSequences = { alpha: 0, bravo: 0 };
     this.opportunities = { alpha: 0, bravo: 0 };
     this.usedOpportunities = { alpha: 0, bravo: 0 };
+    this.expiredOpportunities = { alpha: 0, bravo: 0 };
     this.firingTicks = { alpha: 0, bravo: 0 };
-    this.opportunityWindows = {};
+    this.openFiringOpportunities = { alpha: {}, bravo: {} };
+    this.opportunitySequences = {
+      alpha: [0, 0, 0, 0],
+      bravo: [0, 0, 0, 0],
+    };
+    this.firingOpportunities = [];
     this.disposed = false;
   }
   controller(id) {
@@ -75,6 +86,7 @@ export class DuelRunner {
   event(id, snapshot) {
     const e = {
       battleId: this.battleId,
+      decisionId: `${this.battleId}:${id}:d${++this.decisionSequences[id]}`,
       simulationTimestampMs: this.sim.timeMs,
       controller: this.controller(id),
       ship: id,
@@ -97,6 +109,7 @@ export class DuelRunner {
     ship.commit(action, {
       decisionAtMs: event.snapshot.timeMs,
       appliedAtMs: this.sim.timeMs,
+      decisionId: event.decisionId,
     });
     const constraintsAtApply = ship.actionConstraints(current.opponent.track);
     Object.assign(event, result, {
@@ -138,11 +151,67 @@ export class DuelRunner {
     });
     this.latest[id] = event;
   }
+  recordFiringOpportunities(ship, readiness, firedTurrets) {
+    const active = this.openFiringOpportunities[ship.id],
+      fired = new Set(firedTurrets),
+      timeMs = this.sim.timeMs;
+    readiness.forEach((turret, index) => {
+      const didFire = fired.has(index);
+      let opportunity = active[index];
+      if (!opportunity && (turret.readyToFire || didFire)) {
+        const sequence = ++this.opportunitySequences[ship.id][index];
+        opportunity = {
+          id: `${this.battleId}:${ship.id}:t${index}:o${sequence}`,
+          ship: ship.id,
+          turret: index,
+          lifecycle: "OPEN",
+          openedAtSimulationMs: timeMs,
+          openedByDecisionId: ship.actionDecisionId ?? null,
+          openedWithAction: { ...ship.action },
+          usedAtSimulationMs: null,
+          usedByDecisionId: null,
+          usedWithAction: null,
+          expiredAtSimulationMs: null,
+        };
+        this.firingOpportunities.push(opportunity);
+        active[index] = opportunity;
+        this.opportunities[ship.id]++;
+      }
+      if (!opportunity) return;
+      if (didFire) {
+        opportunity.lifecycle = "USED";
+        opportunity.usedAtSimulationMs = timeMs;
+        opportunity.usedByDecisionId = ship.actionDecisionId ?? null;
+        opportunity.usedWithAction = { ...ship.action };
+        this.usedOpportunities[ship.id]++;
+        delete active[index];
+      } else if (!turret.readyToFire) {
+        opportunity.lifecycle = "EXPIRED";
+        opportunity.expiredAtSimulationMs = timeMs;
+        opportunity.expiredReason = "READINESS_CLOSED";
+        this.expiredOpportunities[ship.id]++;
+        delete active[index];
+      }
+    });
+  }
+  expireOpenFiringOpportunities(reason) {
+    for (const ship of this.sim.ships) {
+      const active = this.openFiringOpportunities[ship.id];
+      for (const [index, opportunity] of Object.entries(active)) {
+        opportunity.lifecycle = "EXPIRED";
+        opportunity.expiredAtSimulationMs = this.sim.timeMs;
+        opportunity.expiredReason = reason;
+        this.expiredOpportunities[ship.id]++;
+        delete active[index];
+      }
+    }
+  }
   fail(event, reason) {
     event.status = "FAILED";
     event.failureReason = reason;
     this.failures++;
     this.sim.invalidate(reason);
+    this.expireOpenFiringOpportunities("BATTLE_INVALIDATED");
     this.pending?.abort.abort();
     this.pending = null;
   }
@@ -257,11 +326,6 @@ export class DuelRunner {
       );
       snapshots.forEach((snapshot, i) => {
         const id = this.sim.ships[i].id;
-        if (snapshot.self.firingOpportunity) this.opportunities[id]++;
-        this.opportunityWindows[id] = {
-          observed: snapshot.self.firingOpportunity,
-          used: false,
-        };
         if (
           id === this.contenderShip &&
           this.mode !== "CONTROL" &&
@@ -287,6 +351,11 @@ export class DuelRunner {
     this.sim.step();
     for (const ship of this.sim.ships) {
       const event = this.latest[ship.id];
+      this.recordFiringOpportunities(
+        ship,
+        currentFiringReadiness(this.sim, ship.id),
+        ship.firedTurretsThisTick,
+      );
       if (event) {
         if (ship.blocked.length) {
           event.firstConstraintTimeMs ??= this.sim.timeMs;
@@ -318,18 +387,17 @@ export class DuelRunner {
               firstTimeMs: this.sim.timeMs,
             });
         }
-        if (ship.lastSalvoMs === this.sim.timeMs) {
+      }
+      if (ship.firedTurretsThisTick.length) {
+        this.firingTicks[ship.id]++;
+        if (event) {
           event.firedDuringDecisionWindow = true;
           event.firstFireTimeMs ??= this.sim.timeMs;
-          this.firingTicks[ship.id]++;
-          const window = this.opportunityWindows[ship.id];
-          if (window?.observed && !window.used) {
-            this.usedOpportunities[ship.id]++;
-            window.used = true;
-          }
         }
       }
     }
+    if (this.sim.status !== "RUNNING")
+      this.expireOpenFiringOpportunities("BATTLE_ENDED");
     if (this.sim.status !== "RUNNING" && this.pending) {
       this.pending.event.status = "DISCARDED_BATTLE_ENDED";
       this.pending.abort.abort();
@@ -382,6 +450,10 @@ export class DuelRunner {
         ).length,
         observedFiringOpportunities: this.opportunities[s.id],
         usedFiringOpportunities: this.usedOpportunities[s.id],
+        expiredFiringOpportunities: this.expiredOpportunities[s.id],
+        openFiringOpportunities: Object.keys(
+          this.openFiringOpportunities[s.id],
+        ).length,
         firingTicks: this.firingTicks[s.id],
         hitRate: s.stats.shots ? s.stats.hits / s.stats.shots : 0,
         damagePerShot: s.stats.shots ? s.stats.damageDealt / s.stats.shots : 0,
@@ -445,6 +517,7 @@ export class DuelRunner {
     return {
       summary: this.summary(),
       decisions: this.events,
+      firingOpportunities: this.firingOpportunities,
       impacts: this.sim.impacts,
       frames: this.sim.frames,
       trackResearch: this.sim.trackResearch,

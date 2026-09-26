@@ -43,8 +43,8 @@ export class OpponentObservationState {
           age == null
             ? "NO_OBSERVED_SALVO"
             : age < C.reloadMs
-              ? "RELOADING"
-              : "LIKELY_READY",
+              ? "RECENT_FIRE_OBSERVED"
+              : "OLD_FIRE_OBSERVATION",
         lastSalvoObservedAgeMs: age,
       },
       observedAtMs: sample?.observedAtMs ?? 0,

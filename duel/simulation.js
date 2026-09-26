@@ -41,6 +41,7 @@ export class DuelShip {
     this.holdHeading = this.heading;
     this.lastSalvoMs = null;
     this.salvoSequence = 0;
+    this.firedTurretsThisTick = [];
     this.rngRole = id === "alpha" ? "R0" : "R1";
     this.streamIds = Object.fromEntries(
       ["dispersion", "armor", "modules", "observation"].map((p) => [
@@ -71,7 +72,10 @@ export class DuelShip {
     this.blocked = [];
     this.boundaryBlocked = false;
   }
-  commit(action, { decisionAtMs = 0, appliedAtMs = decisionAtMs } = {}) {
+  commit(
+    action,
+    { decisionAtMs = 0, appliedAtMs = decisionAtMs, decisionId = null } = {},
+  ) {
     if (
       action.maneuver === "HOLD_COURSE" &&
       this.action.maneuver !== "HOLD_COURSE"
@@ -80,6 +84,7 @@ export class DuelShip {
     this.action = validateAction(action);
     this.actionDecisionAtMs = decisionAtMs;
     this.actionAppliedAtMs = appliedAtMs;
+    this.actionDecisionId = decisionId;
   }
   move(target) {
     const bearing = Math.atan2(target.y - this.y, target.x - this.x);
@@ -139,6 +144,7 @@ export class DuelShip {
   weapons(target, timeMs, nextProjectileId = () => null) {
     const shells = [];
     this.blocked = [];
+    this.firedTurretsThisTick = [];
     this.turrets.forEach((turret, i) => {
       turret.reload = Math.max(0, turret.reload - C.dt * 1000);
       turret.impaired = Math.max(0, turret.impaired - C.dt * 1000);
@@ -169,6 +175,7 @@ export class DuelShip {
       turret.reload = C.reloadMs;
       this.lastSalvoMs = timeMs;
       this.salvoSequence++;
+      this.firedTurretsThisTick.push(i);
       for (let b = 0; b < C.barrels; b++) {
         const lateral =
           (2 * this.streams.dispersion() - 1) * dispersionHalfWidth(aim.range);
@@ -234,17 +241,8 @@ export class DuelShip {
   }
 }
 
-// This is the ONLY policy observation builder. No policy receives a DuelShip.
-export function tacticalSnapshot(sim, id) {
-  const self = sim.ships.find((s) => s.id === id),
-    observed = sim.opponentObservations[id].estimate(sim.timeMs);
-  const track = observed.track;
-  const bearing = Math.atan2(
-      track.position.y - self.y,
-      track.position.x - self.x,
-    ),
-    range = Math.hypot(track.position.x - self.x, track.position.y - self.y);
-  const turrets = self.turrets.map((t, i) => {
+function firingReadiness(self, track, range) {
+  return self.turrets.map((t, i) => {
     const aim = aimSolution(self, track, i, self.action.aimZone);
     const canBear = turretCanBear(self, i, aim.angle),
       error = Math.abs(angleDelta(t.angle, aim.angle));
@@ -263,9 +261,29 @@ export function tacticalSnapshot(sim, id) {
         range <= C.maxRange,
     };
   });
+}
+
+export function currentFiringReadiness(sim, id) {
+  const self = sim.ships.find((s) => s.id === id),
+    track = sim.opponentObservations[id].estimate(sim.timeMs).track,
+    range = Math.hypot(track.position.x - self.x, track.position.y - self.y);
+  return firingReadiness(self, track, range);
+}
+
+// This is the ONLY policy observation builder. No policy receives a DuelShip.
+export function tacticalSnapshot(sim, id) {
+  const self = sim.ships.find((s) => s.id === id),
+    observed = sim.opponentObservations[id].estimate(sim.timeMs);
+  const track = observed.track;
+  const bearing = Math.atan2(
+      track.position.y - self.y,
+      track.position.x - self.x,
+    ),
+    range = Math.hypot(track.position.x - self.x, track.position.y - self.y),
+    turrets = firingReadiness(self, track, range);
   const enemyAspect = aspect(bearing, track.estimatedHeading ?? bearing);
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     timeMs: sim.timeMs,
     self: {
       hp: self.hp,
@@ -505,6 +523,7 @@ export class DuelSimulation {
         actualTargetVelocityAtLaunch: { x: target.vx, y: target.vy },
         actualTargetHeadingAtLaunch: target.heading,
         actualTargetAspectAtLaunch: actualAspect,
+        launchRangeUnits: Math.hypot(target.x - origin.x, target.y - origin.y),
         trackPositionErrorAtLaunch: Math.hypot(
           shell.launchTrack.estimatedTargetPosition.x - target.x,
           shell.launchTrack.estimatedTargetPosition.y - target.y,
@@ -515,11 +534,16 @@ export class DuelSimulation {
         ),
         idealAimAngle: shell.idealAimAngle,
         actualDispersedAngle: shell.angle,
+        dispersionOffsetUnits:
+          Math.sin(angleDelta(shell.idealAimAngle, shell.angle)) *
+          Math.hypot(target.x - origin.x, target.y - origin.y),
         closestApproachDistance: null,
+        closestApproachAtMs: null,
         actualTargetPositionAtClosestApproach: null,
         actualTargetVelocityAtClosestApproach: null,
         actualTargetHeadingAtClosestApproach: null,
         actualTargetAspectAtClosestApproach: null,
+        rangeExpiredAtMs: null,
         impact: null,
       };
       this.projectileResearch.push(analysis);
@@ -558,6 +582,7 @@ export class DuelSimulation {
           distance < analysis.closestApproachDistance
         ) {
           analysis.closestApproachDistance = distance;
+          analysis.closestApproachAtMs = this.timeMs;
           analysis.actualTargetPositionAtClosestApproach = {
             x: target.x,
             y: target.y,
@@ -596,6 +621,7 @@ export class DuelSimulation {
         pending.push(impact);
       } else if (shell.distance < C.maxRange)
         remaining.push({ ...shell, ...next });
+      else if (analysis) analysis.rangeExpiredAtMs = this.timeMs;
     }
     this.projectiles = remaining;
     // Proportionally allocate overkill damage within a tick: no first-shell credit advantage.
