@@ -1,4 +1,6 @@
-# Browser Naval Game Prototype
+# Ship Happens
+
+A browser naval roguelite. The main menu's **Codex** compares all four playable navies, their in-game ship models, doctrines, weapon loadouts, and starting statistics.
 
 Recovered from James Lane's [shared Gemini Canvas](https://gemini.google.com/share/58d79ed504b5) on September 18, 2026.
 
