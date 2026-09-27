@@ -2,7 +2,8 @@
 <html lang="en"><head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Naval Roguelite</title>
+    <title>Ship Happens</title>
+    <meta name="description" content="Ship Happens is a browser naval roguelite. Choose a navy, outfit its battleship, and survive five waves.">
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body {
@@ -119,6 +120,61 @@
             border-radius: 4px; overflow: hidden;
         }
 
+        .codex-menu {
+            width: min(1440px, 100%);
+            max-height: calc(100vh - 1.5rem);
+            max-height: calc(100dvh - 1.5rem);
+            padding: clamp(1rem, 2vw, 2rem);
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            overflow: hidden;
+        }
+        .codex-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+        .codex-header-copy { min-width: 0; }
+        .codex-scroll {
+            min-height: 0;
+            overflow: auto;
+            overscroll-behavior: contain;
+            touch-action: pan-y;
+            padding: 2px 2px 6px;
+            scrollbar-color: #475569 #0f172a;
+        }
+        .codex-fleet { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .85rem; }
+        .codex-ship-card {
+            min-width: 0;
+            padding: .85rem;
+            border: 1px solid rgba(148, 163, 184, .24);
+            border-radius: .9rem;
+            background: linear-gradient(160deg, rgba(30, 41, 59, .9), rgba(2, 6, 23, .92));
+        }
+        .codex-country { font-size: 1.05rem; line-height: 1.2; font-weight: 900; letter-spacing: .035em; }
+        .codex-navy { margin-top: .2rem; color: #94a3b8; font-size: .62rem; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
+        .codex-model { width: 100%; height: 108px; margin: .65rem 0; border: 1px solid rgba(56, 189, 248, .18); border-radius: .55rem; background: #071522; }
+        .codex-doctrine { min-height: 3.8rem; margin-bottom: .7rem; }
+        .codex-doctrine-title { color: #7dd3fc; font-size: .65rem; font-weight: 900; letter-spacing: .12em; text-transform: uppercase; }
+        .codex-doctrine-copy { margin-top: .25rem; color: #cbd5e1; font-size: .72rem; line-height: 1.35; }
+        .codex-stat-section { margin-top: .55rem; padding-top: .5rem; border-top: 1px solid rgba(255, 255, 255, .1); }
+        .codex-stat-heading { margin-bottom: .2rem; color: #94a3b8; font-size: .61rem; font-weight: 900; letter-spacing: .14em; text-transform: uppercase; }
+        .codex-stat-list { display: grid; gap: .14rem; }
+        .codex-stat-row { display: flex; justify-content: space-between; gap: .4rem; color: #cbd5e1; font-size: .67rem; line-height: 1.3; }
+        .codex-stat-row dt { flex: 0 1 auto; }
+        .codex-stat-row dd { flex: 0 0 auto; margin: 0; color: #f8fafc; font-weight: 800; text-align: right; }
+        .codex-note { color: #94a3b8; font-size: .65rem; line-height: 1.35; }
+        button:focus-visible, [tabindex="0"]:focus-visible { outline: 3px solid #38bdf8; outline-offset: 3px; }
+        .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+        @media (max-width: 1050px) { .codex-fleet { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        @media (max-width: 620px) {
+            .ship-logo { max-width: 96vw; font-size: 3.25rem; }
+            .ship-logo.header-view { top: 8%; font-size: clamp(1.8rem, 9vw, 3rem); }
+            .codex-fleet { grid-template-columns: minmax(0, 1fr); }
+            .codex-doctrine { min-height: 0; }
+            .codex-menu { gap: .65rem; }
+            .codex-header { align-items: stretch; flex-direction: column; }
+            #codex-back { width: 100%; padding: .7rem 1rem; }
+            .codex-model { height: 132px; }
+        }
+
         canvas { display: block; position: relative; z-index: 5; }
         .ui-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; display: flex; flex-direction: column; z-index: 50; }
         .pointer-events-auto { pointer-events: auto; }
@@ -153,8 +209,8 @@
     <div id="background-layer">
         <div class="wave wave-back"></div>
         <div class="wave"></div>
-        <div id="main-logo" class="ship-logo active">Naval Roguelite</div>
-        <div id="engage-prompt" class="absolute bottom-20 left-1/2 -translate-x-1/2 text-slate-400 font-mono tracking-[0.5em] animate-pulse cursor-pointer z-[110]" onclick="transitionToMainMenu()">Click to Engage</div>
+        <div id="main-logo" class="ship-logo active">Ship Happens</div>
+        <button id="engage-prompt" type="button" class="absolute bottom-20 left-1/2 -translate-x-1/2 text-slate-400 font-mono tracking-[0.5em] animate-pulse cursor-pointer z-[110]" onclick="transitionToMainMenu()">Click to Engage</button>
     </div>
 
     <canvas id="gameCanvas" class="pointer-events-auto" width="1702" height="1442"></canvas>
@@ -216,6 +272,7 @@
         <div id="main-menu" class="max-w-md w-full flex flex-col gap-5 text-center mt-32">
             <button onclick="showSubMenu('nation-select')" class="btn-primary py-5 text-xl">Skirmish</button>
             <button onclick="showSubMenu('options-menu')" class="btn-secondary">Options</button>
+            <button id="open-codex-btn" onclick="showSubMenu('codex-menu')" class="btn-secondary">Codex</button>
             <button onclick="showSubMenu('credits-menu')" class="btn-secondary">Credits</button>
         </div>
 
@@ -241,6 +298,21 @@
             </div>
             <button onclick="showSubMenu('main-menu')" class="w-full btn-secondary pointer-events-auto">Back to Command</button>
         </div>
+
+        <section id="codex-menu" class="codex-menu menu-card hidden" role="dialog" aria-modal="true" aria-labelledby="codex-title">
+            <div class="codex-header">
+                <div class="codex-header-copy">
+                    <div class="text-[10px] font-black uppercase tracking-[0.3em] text-sky-400">Fleet register</div>
+                    <h2 id="codex-title" class="text-2xl font-black uppercase italic">Ship Codex</h2>
+                    <p class="text-xs text-slate-400">Playable navies, in-game hulls, doctrines, and starting loadouts.</p>
+                </div>
+                <button id="codex-back" onclick="showSubMenu('main-menu')" class="btn-secondary pointer-events-auto shrink-0">Back to Command</button>
+            </div>
+            <div id="codex-scroll" class="codex-scroll pointer-events-auto" role="region" aria-label="Playable ships and statistics" tabindex="0">
+                <div id="codex-fleet" class="codex-fleet"></div>
+            </div>
+            <p class="codex-note">Base values are before refits. Main salvo damage assumes every barrel hits; projectile speeds, radii, and ranges use game units. Main turrets begin firing 0.45 seconds apart; secondaries auto-fire inside their side arcs.</p>
+        </section>
 
         <div id="options-menu" class="max-w-md w-full menu-card hidden">
             <h2 class="text-2xl font-black mb-8 text-sky-400 uppercase italic">Configuration</h2>
@@ -326,15 +398,22 @@ let enemies = [], projectiles = [], drops = [], islands = [], damagePopups = [],
 let wave = 1, scrap = 0, selectedNation = 'USA', zoom = 0.45;
 let sfxVol = 0.8, musicVol = 0.5, weatherVol = 0.4, keys = {}, lastTime = 0, accumulator = 0;
 let animationLoopActive = false, animationLoopStarts = 0;
+let visibleMenuId = null, codexReturnFocus = null;
+const GAME_TITLE = 'Ship Happens';
 const TIME_STEP = 1000 / 60;
 
 let showFPS = false, frameCount = 0, fpsLastTime = 0, currentFPS = 0, isMobileUI = false, autoThrust = false;
 
 const NATIONS = {
-    'USA': { main: { reload: 14000, damage: 650, range: 3800, turrets: 3, barrels: 3 }, secondary: { reload: 800, damage: 15, range: 1200, turrets: 10 }, hull: { health: 2500, speed: 0.35, accel: 0.06, color: '#475569' } },
-    'Japan': { main: { reload: 21000, damage: 850, range: 4800, turrets: 5, barrels: 2 }, secondary: { reload: 1100, damage: 45, range: 1400, turrets: 4 }, hull: { health: 2800, speed: 0.3, accel: 0.045, color: '#334155' } },
-    'Germany': { main: { reload: 12000, damage: 550, range: 3400, turrets: 4, barrels: 2 }, secondary: { reload: 600, damage: 25, range: 2200, turrets: 14 }, hull: { health: 3200, speed: 0.38, accel: 0.075, color: '#4b5563' } },
-    'UK': { main: { reload: 11000, damage: 400, range: 3200, turrets: 5, barrels: 3 }, secondary: { reload: 1000, damage: 12, range: 1100, turrets: 12 }, hull: { health: 2300, speed: 0.42, accel: 0.09, color: '#374151' } }
+    'USA': { country: 'United States', navy: 'US Navy', doctrine: 'Rapid Fire Loadout', doctrineSummary: 'Balanced main guns backed by ten quick-cycling secondary mounts.', main: { reload: 14000, damage: 650, range: 3800, turrets: 3, barrels: 3 }, secondary: { reload: 800, damage: 15, range: 1200, turrets: 10 }, hull: { health: 2500, speed: 0.35, accel: 0.06, color: '#475569' } },
+    'Japan': { country: 'Japan', navy: 'Imperial Japanese Navy', doctrine: 'Heavy Strike Doctrine', doctrineSummary: 'The longest-ranged, hardest-hitting main battery, with slower reloads and fewer secondary mounts.', main: { reload: 21000, damage: 850, range: 4800, turrets: 5, barrels: 2 }, secondary: { reload: 1100, damage: 45, range: 1400, turrets: 4 }, hull: { health: 2800, speed: 0.3, accel: 0.045, color: '#334155' } },
+    'Germany': { country: 'Germany', navy: 'Kriegsmarine', doctrine: 'Brawler Armor', doctrineSummary: 'The largest starting hull, rapid main reloads, and dense secondary coverage at close range.', main: { reload: 12000, damage: 550, range: 3400, turrets: 4, barrels: 2 }, secondary: { reload: 600, damage: 25, range: 2200, turrets: 14 }, hull: { health: 3200, speed: 0.38, accel: 0.075, color: '#4b5563' } },
+    'UK': { country: 'United Kingdom', navy: 'Royal Navy', doctrine: 'Barrage Focus', doctrineSummary: 'Five triple main turrets and twelve secondary mounts deliver the broadest volume of fire.', main: { reload: 11000, damage: 400, range: 3200, turrets: 5, barrels: 3 }, secondary: { reload: 1000, damage: 12, range: 1100, turrets: 12 }, hull: { health: 2300, speed: 0.42, accel: 0.09, color: '#374151' } }
+};
+
+const PLAYER_PROJECTILE_SPECS = {
+    main: { speed: 11, radius: 13 },
+    secondary: { speed: 15, radius: 5 }
 };
 
 const ENEMY_SPECS = {
@@ -372,7 +451,11 @@ const WAVE_ROSTERS = {
  * STATE MANAGEMENT
  * ==========================================
  */
-window.onload = () => { setTimeout(() => { document.getElementById('main-logo').classList.add('active'); }, 500); };
+window.onload = () => {
+    document.title = GAME_TITLE;
+    document.getElementById('main-logo').textContent = GAME_TITLE;
+    setTimeout(() => { document.getElementById('main-logo').classList.add('active'); }, 500);
+};
 
 function transitionToMainMenu() {
     if (gameState !== 'SPLASH') return;
@@ -384,10 +467,87 @@ function transitionToMainMenu() {
 }
 
 function showSubMenu(menuId) {
+    const wasCodexOpen = visibleMenuId === 'codex-menu';
+    if (menuId === 'codex-menu' && !wasCodexOpen) codexReturnFocus = document.activeElement;
     document.getElementById('menu-overlay').classList.remove('hidden');
-    ['main-menu', 'nation-select', 'options-menu', 'credits-menu', 'confirm-end-menu', 'defeat-menu', 'victory-menu', 'levelup-menu']
+    ['main-menu', 'nation-select', 'codex-menu', 'options-menu', 'credits-menu', 'confirm-end-menu', 'defeat-menu', 'victory-menu', 'levelup-menu']
     .forEach(id => document.getElementById(id).classList.add('hidden'));
     document.getElementById(menuId).classList.remove('hidden');
+    visibleMenuId = menuId;
+    if (menuId === 'codex-menu') {
+        renderShipCodex();
+        document.getElementById('codex-back').focus();
+    } else if (menuId === 'main-menu' && wasCodexOpen && codexReturnFocus?.isConnected) {
+        codexReturnFocus.focus();
+        codexReturnFocus = null;
+    }
+}
+
+function renderShipCodex() {
+    const fleet = document.getElementById('codex-fleet');
+    const number = value => value.toLocaleString('en-US');
+    const seconds = milliseconds => (milliseconds / 1000).toFixed(1);
+    const statRow = (label, value) => `<div class="codex-stat-row"><dt>${label}</dt><dd>${value}</dd></div>`;
+    fleet.innerHTML = Object.entries(NATIONS).map(([nation, ship]) => {
+        const mainSalvo = ship.main.damage * ship.main.barrels;
+        return `<article class="codex-ship-card" data-codex-nation="${nation}">
+            <header><h3 class="codex-country">${ship.country}</h3><p class="codex-navy">${ship.navy}</p></header>
+            <figure>
+                <canvas class="codex-model" width="480" height="160" data-ship-model="${nation}" role="img" aria-label="In-game ${ship.country} ship model"></canvas>
+                <figcaption class="sr-only">The ${ship.country} playable battleship, facing forward with its starting gun mounts.</figcaption>
+            </figure>
+            <div class="codex-doctrine"><p class="codex-doctrine-title">${ship.doctrine}</p><p class="codex-doctrine-copy">${ship.doctrineSummary}</p></div>
+            <section class="codex-stat-section" aria-label="Main battery">
+                <h4 class="codex-stat-heading">Main battery</h4>
+                <dl class="codex-stat-list">
+                    ${statRow('Turrets / barrels', `${ship.main.turrets} × ${ship.main.barrels} (${number(ship.main.turrets * ship.main.barrels)} total)`)}
+                    ${statRow('Shell / turret salvo', `${number(ship.main.damage)} / ${number(mainSalvo)} dmg`)}
+                    ${statRow('Reload / range', `${seconds(ship.main.reload)}s / ${number(ship.main.range)}`)}
+                    ${statRow('Shell speed / radius', `${PLAYER_PROJECTILE_SPECS.main.speed} / tick · ${PLAYER_PROJECTILE_SPECS.main.radius}`)}
+                </dl>
+            </section>
+            <section class="codex-stat-section" aria-label="Secondary battery">
+                <h4 class="codex-stat-heading">Secondary battery</h4>
+                <dl class="codex-stat-list">
+                    ${statRow('Gun mounts', number(ship.secondary.turrets))}
+                    ${statRow('Damage / mount reload', `${number(ship.secondary.damage)} / ${seconds(ship.secondary.reload)}s`)}
+                    ${statRow('Range', number(ship.secondary.range))}
+                    ${statRow('Shell speed / radius', `${PLAYER_PROJECTILE_SPECS.secondary.speed} / tick · ${PLAYER_PROJECTILE_SPECS.secondary.radius}`)}
+                </dl>
+            </section>
+            <section class="codex-stat-section" aria-label="Starting statistics">
+                <h4 class="codex-stat-heading">Starting statistics</h4>
+                <dl class="codex-stat-list">
+                    ${statRow('Hull integrity', `${number(ship.hull.health)} HP`)}
+                    ${statRow('Thrust acceleration', `${ship.hull.accel.toFixed(3)} / tick`)}
+                    ${statRow('Level / XP', '1 / 0 of 150')}
+                    ${statRow('Upgrade multipliers', 'Damage, reload, speed ×1.00')}
+                </dl>
+            </section>
+        </article>`;
+    }).join('');
+    fleet.querySelectorAll('[data-ship-model]').forEach(canvas => drawShipCodexModel(canvas, canvas.dataset.shipModel));
+}
+
+function drawShipCodexModel(canvas, nation) {
+    const context = canvas.getContext('2d');
+    const bounds = canvas.getBoundingClientRect();
+    const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+    const displayWidth = Math.max(1, bounds.width);
+    const displayHeight = Math.max(1, bounds.height);
+    canvas.width = Math.round(displayWidth * pixelRatio);
+    canvas.height = Math.round(displayHeight * pixelRatio);
+    context.scale(pixelRatio, pixelRatio);
+
+    const water = context.createLinearGradient(0, 0, 0, displayHeight);
+    water.addColorStop(0, '#0b1b2a'); water.addColorStop(1, '#07111e');
+    context.fillStyle = water; context.fillRect(0, 0, displayWidth, displayHeight);
+    context.strokeStyle = 'rgba(125, 211, 252, .08)'; context.lineWidth = 1;
+    for (let y = 18; y < displayHeight; y += 22) {
+        context.beginPath(); context.moveTo(0, y); context.lineTo(displayWidth, y); context.stroke();
+    }
+    const scale = Math.min(displayWidth / 170, displayHeight / 250);
+    drawPlayerShipModel(context, nation, NATIONS[nation].hull.color, displayWidth / 2, displayHeight / 2, -Math.PI / 2, -Math.PI / 2, 50, scale);
 }
 
 function handleMenuExit() {
@@ -626,6 +786,31 @@ function drawDetailedHull(context, nation, radius, hullColor, isPlayer = false) 
     context.restore();
 }
 
+function drawPlayerShipModel(context, nation, hullColor, x, y, angle, turretAngle, radius = 50, scale = 1) {
+    const config = NATIONS[nation];
+    context.save();
+    context.translate(x, y);
+    context.rotate(angle);
+    context.scale(scale, scale);
+    drawDetailedHull(context, nation, radius, hullColor, true);
+    for (let i = 0; i < (config.secondary.turrets || 8); i++) {
+        const side = i % 2 === 0 ? 1 : -1, step = Math.floor(i / 2), ox = -20 + step * 10, oy = side * 32;
+        context.fillStyle = '#334155'; context.strokeStyle = '#000'; context.beginPath(); context.arc(ox, oy, 5, 0, Math.PI * 2); context.fill(); context.stroke();
+    }
+    for (let i = 0; i < config.main.turrets; i++) {
+        context.save(); context.translate((i - (config.main.turrets - 1) / 2) * (radius * 0.7), 0); context.rotate(turretAngle - angle);
+        const turretSize = 22; context.fillStyle = '#475569'; context.strokeStyle = '#000'; context.lineWidth = 2;
+        context.beginPath(); context.rect(-turretSize / 2, -turretSize / 2, turretSize, turretSize); context.fill(); context.stroke();
+        context.fillStyle = '#000';
+        for (let barrel = 0; barrel < config.main.barrels; barrel++) {
+            const barrelY = (barrel - (config.main.barrels - 1) / 2) * 5;
+            context.fillRect(turretSize / 2, barrelY - 1.5, 24, 3);
+        }
+        context.restore();
+    }
+    context.restore();
+}
+
 /** * ==========================================
  * ENTITY CLASSES
  * ==========================================
@@ -732,7 +917,7 @@ class Player {
     }
     fireMain(idx) {
         const off = (idx - (this.config.main.turrets-1)/2) * (this.radius * 0.7), tX = this.x + Math.cos(this.angle)*off, tY = this.y + Math.sin(this.angle)*off;
-        for(let i=0; i<this.config.main.barrels; i++) projectiles.push(new Projectile(tX, tY, this.turretAngle + (Math.random()-0.5)*0.04, true, 11, this.config.main.damage * this.damageMult, '#ef4444', 13));
+        for(let i=0; i<this.config.main.barrels; i++) projectiles.push(new Projectile(tX, tY, this.turretAngle + (Math.random()-0.5)*0.04, true, PLAYER_PROJECTILE_SPECS.main.speed, this.config.main.damage * this.damageMult, '#ef4444', PLAYER_PROJECTILE_SPECS.main.radius));
         SoundManager.playMainGun();
     }
     getSecondaryTarget(idx, targets = enemies) {
@@ -748,7 +933,7 @@ class Player {
     fireSec(idx, target) {
         const side = idx % 2 === 0 ? 1 : -1, step = Math.floor(idx / 2), relX = -20 + step * 10, relY = side * 32;
         const tX = this.x + Math.cos(this.angle) * relX - Math.sin(this.angle) * relY, tY = this.y + Math.sin(this.angle) * relX + Math.cos(this.angle) * relY;
-        projectiles.push(new Projectile(tX, tY, Math.atan2(target.y - tY, target.x - tX), true, 15, this.config.secondary.damage * this.damageMult, '#fff', 5));
+        projectiles.push(new Projectile(tX, tY, Math.atan2(target.y - tY, target.x - tX), true, PLAYER_PROJECTILE_SPECS.secondary.speed, this.config.secondary.damage * this.damageMult, '#fff', PLAYER_PROJECTILE_SPECS.secondary.radius));
         SoundManager.playSecondary();
     }
     draw() {
@@ -757,20 +942,7 @@ class Player {
         ctx.setLineDash([5, 10]); ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)'; ctx.lineWidth = 2/zoom; ctx.beginPath(); ctx.arc(this.x, this.y, this.config.secondary.range, 0, Math.PI*2); ctx.stroke();
         ctx.restore();
         if (this.waypoint) { ctx.save(); ctx.strokeStyle = '#38bdf8'; ctx.lineWidth = 4/zoom; ctx.beginPath(); ctx.arc(this.waypoint.x, this.waypoint.y, 25, 0, Math.PI*2); ctx.stroke(); ctx.restore(); }
-        ctx.save(); ctx.translate(this.x, this.y); ctx.rotate(this.angle);
-        drawDetailedHull(ctx, this.nation, this.radius, this.config.hull.color, true);
-        for(let i=0; i < (this.config.secondary.turrets || 8); i++) {
-            const side = i % 2 === 0 ? 1 : -1, step = Math.floor(i / 2), ox = -20 + step * 10, oy = side * 32;
-            ctx.fillStyle = '#334155'; ctx.strokeStyle = '#000'; ctx.beginPath(); ctx.arc(ox, oy, 5, 0, Math.PI*2); ctx.fill(); ctx.stroke();
-        }
-        for (let i=0; i<this.config.main.turrets; i++) {
-            ctx.save(); ctx.translate((i-(this.config.main.turrets-1)/2)*(this.radius*0.7), 0); ctx.rotate(this.turretAngle-this.angle);
-            const ts = 22; ctx.fillStyle='#475569'; ctx.strokeStyle='#000'; ctx.lineWidth=2;
-            ctx.beginPath(); ctx.rect(-ts/2, -ts/2, ts, ts); ctx.fill(); ctx.stroke();
-            ctx.fillStyle='#000'; for(let b=0; b<this.config.main.barrels; b++) { const by=(b-(this.config.main.barrels-1)/2)*5; ctx.fillRect(ts/2, by-1.5, 24, 3); }
-            ctx.restore();
-        }
-        ctx.restore();
+        drawPlayerShipModel(ctx, this.nation, this.config.hull.color, this.x, this.y, this.angle, this.turretAngle, this.radius);
     }
 }
 
@@ -1300,7 +1472,25 @@ function startGame() {
 
 function resize() { width = window.innerWidth; height = window.innerHeight; canvas.width = width; canvas.height = height; mCanvas.width = 280; mCanvas.height = 280; }
 window.addEventListener('resize', resize); resize();
-window.addEventListener('keydown', e => { keys[e.code] = true; if (e.code === 'Escape') togglePause(); });
+window.addEventListener('keydown', e => {
+    keys[e.code] = true;
+    const codex = document.getElementById('codex-menu');
+    if (!codex.classList.contains('hidden')) {
+        if (e.code === 'Escape') {
+            e.preventDefault();
+            showSubMenu('main-menu');
+            return;
+        }
+        if (e.code === 'Tab') {
+            const focusable = [...codex.querySelectorAll('button:not(:disabled), [tabindex="0"]')];
+            const first = focusable[0], last = focusable[focusable.length - 1];
+            if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+            else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+        }
+        return;
+    }
+    if (e.code === 'Escape') togglePause();
+});
 window.addEventListener('keyup', e => { keys[e.code] = false; });
 window.oncontextmenu = (e) => e.preventDefault();
 

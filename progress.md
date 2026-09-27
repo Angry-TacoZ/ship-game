@@ -4,12 +4,11 @@ Original prompt: Recover the playable browser naval game and continue its develo
 
 - The recovered static game is prepared for GitHub Pages.
 - `npm run verify` checks desktop pointer and mobile touch startup/gameplay paths and saves ignored screenshots in `output/playwright/`.
-- The public title is intentionally a neutral genre label until James chooses a final game name.
+- The game title is Ship Happens in the browser title and splash/menu branding.
 - Player defeat now clamps hull to zero, stops the run, and shows a mission-lost menu with a return path.
 
 ## Follow-ups
 
-- Choose a final title and centralize it in a configuration value before applying it to visible UI and metadata.
 - Add deterministic simulation hooks before writing deeper gameplay-regression tests.
 - Fix the documented duplicate-animation-loop issue in a focused change.
 
@@ -53,3 +52,10 @@ Original prompt: Recover the playable browser naval game and continue its develo
 
 - Candidate tactical plans now remain candidates until the steering cooldown permits committing them; active movement uses only the committed mode and crossing side.
 - Added regression coverage for forward hull/velocity alignment, hard-turn braking, cooldown-held CROSS behavior, delayed REPOSITION, and urgent SEPARATE interruption.
+
+## Ship Happens title and fleet codex
+
+- Renamed the browser title and splash/menu logo to Ship Happens; adjusted the logo for narrow screens.
+- Added a main-menu Codex between Options and Credits, with all four playable navy models, country, doctrine summary, weapon stats, and level-one starting values.
+- Reused the gameplay hull and turret renderer for codex models so the cards reflect the actual player-ship silhouettes and mounts.
+- Added desktop keyboard focus/close behavior and mobile touch scrolling; extended `npm run verify` to check rendered models, displayed stats, and menu navigation.

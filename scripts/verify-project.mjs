@@ -24,6 +24,98 @@ function startServer() {
   });
 }
 
+async function verifyShipCodex(browser) {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  if ((await page.title()) !== "Ship Happens") throw new Error("The browser title is not Ship Happens.");
+  await page.keyboard.press("Tab");
+  const engageFocused = await page.evaluate(() => document.activeElement.id === "engage-prompt");
+  if (!engageFocused) throw new Error("The splash action is not reachable by keyboard.");
+  await page.keyboard.press("Enter");
+  await page.getByText("Ship Happens", { exact: true }).waitFor();
+  const menuOrder = await page.locator("#main-menu button").allTextContents();
+  if (JSON.stringify(menuOrder.map((label) => label.trim())) !== JSON.stringify(["Skirmish", "Options", "Codex", "Credits"])) {
+    throw new Error(`Main menu order is incorrect: ${JSON.stringify(menuOrder)}`);
+  }
+  await page.getByRole("button", { name: "Codex", exact: true }).waitFor();
+  await page.screenshot({ path: `${outputDirectory}/ship-happens-main-menu.png`, fullPage: true });
+  const openButton = page.getByRole("button", { name: "Codex", exact: true });
+  await openButton.click();
+  const dialog = page.getByRole("dialog", { name: "Ship Codex", exact: true });
+  await dialog.waitFor();
+  await page.waitForFunction(() => document.querySelectorAll("#codex-fleet [data-ship-model]").length === 4);
+
+  const result = await page.evaluate(() => Object.entries(NATIONS).map(([nation, ship]) => {
+    const card = document.querySelector(`[data-codex-nation="${nation}"]`);
+    const model = card.querySelector("[data-ship-model]");
+    const image = model.getContext("2d").getImageData(0, 0, model.width, model.height).data;
+    let hash = 2166136261, visibleShipPixels = 0;
+    const colors = new Set();
+    for (let i = 0; i < image.length; i += 4) {
+      colors.add(`${image[i]},${image[i + 1]},${image[i + 2]}`);
+      if (image[i] >= 45 && image[i + 1] >= 45 && image[i + 2] >= 45) visibleShipPixels++;
+      hash = Math.imul(hash ^ image[i], 16777619);
+      hash = Math.imul(hash ^ image[i + 1], 16777619);
+      hash = Math.imul(hash ^ image[i + 2], 16777619);
+      hash = Math.imul(hash ^ image[i + 3], 16777619);
+    }
+    const text = card.innerText.replaceAll(",", "").toLocaleUpperCase("en-US");
+    const required = [
+      ship.country, ship.doctrine,
+      `${ship.main.turrets} × ${ship.main.barrels} (${ship.main.turrets * ship.main.barrels} total)`,
+      `${ship.main.damage} / ${ship.main.damage * ship.main.barrels} dmg`,
+      `${(ship.main.reload / 1000).toFixed(1)}s / ${ship.main.range}`,
+      `${PLAYER_PROJECTILE_SPECS.main.speed} / tick · ${PLAYER_PROJECTILE_SPECS.main.radius}`,
+      `${ship.secondary.turrets}`,
+      `${ship.secondary.damage} / ${(ship.secondary.reload / 1000).toFixed(1)}s`,
+      `${ship.secondary.range}`,
+      `${PLAYER_PROJECTILE_SPECS.secondary.speed} / tick · ${PLAYER_PROJECTILE_SPECS.secondary.radius}`,
+      `${ship.hull.health} HP`,
+      `${ship.hull.accel.toFixed(3)} / tick`, "1 / 0 of 150", "×1.00"
+    ];
+    return {
+      nation,
+      modelPixels: visibleShipPixels,
+      colors: colors.size,
+      modelSignature: hash,
+      sections: card.querySelectorAll(".codex-stat-section").length,
+      ariaLabel: model.getAttribute("aria-label"),
+      missingFields: required.filter(value => !text.includes(value.toLocaleUpperCase("en-US")))
+    };
+  }));
+  const expectedNations = ["USA", "Japan", "Germany", "UK"];
+  const signatures = new Set(result.map((ship) => ship.modelSignature));
+  if (
+    JSON.stringify(result.map((ship) => ship.nation)) !== JSON.stringify(expectedNations) ||
+    result.some((ship) => ship.modelPixels < 100 || ship.colors < 10 || ship.sections !== 3 || !ship.ariaLabel || ship.missingFields.length > 0) ||
+    signatures.size !== expectedNations.length
+  ) {
+    throw new Error(`Ship codex content or model rendering failed: ${JSON.stringify(result)}`);
+  }
+
+  await page.keyboard.press("Tab");
+  const scrollFocused = await page.evaluate(() => document.activeElement.id === "codex-scroll");
+  if (!scrollFocused) throw new Error("Tab did not move focus into the codex roster.");
+  await page.keyboard.press("Shift+Tab");
+  const backFocused = await page.evaluate(() => document.activeElement.id === "codex-back");
+  await page.keyboard.press("Shift+Tab");
+  const focusWrapped = await page.evaluate(() => document.activeElement.id === "codex-scroll");
+  if (!backFocused || !focusWrapped) throw new Error("Keyboard focus did not cycle within the codex dialog.");
+  await page.keyboard.press("Escape");
+  if (!(await dialog.isHidden()) || !(await page.evaluate(() => document.activeElement.id === "open-codex-btn"))) {
+    throw new Error("Escape did not close the codex and restore focus to its menu button.");
+  }
+  await page.keyboard.press("Enter");
+  await dialog.waitFor();
+  await page.screenshot({ path: `${outputDirectory}/ship-codex.png`, fullPage: true });
+  await page.getByRole("button", { name: "Back to Command", exact: true }).click();
+  await page.getByRole("button", { name: "Credits", exact: true }).waitFor();
+  if (errors.length) throw new Error(`Ship codex browser errors: ${errors.join("; ")}`);
+  await page.close();
+}
+
 async function verifyDesktop(browser) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
   const errors = [];
@@ -199,7 +291,29 @@ async function verifyTouch(browser) {
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto(baseUrl, { waitUntil: "networkidle" });
-  await page.getByText("Click to Engage", { exact: true }).tap();
+  await page.getByRole("button", { name: "Click to Engage", exact: true }).tap();
+  await page.getByText("Ship Happens", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "Codex", exact: true }).waitFor();
+  await page.screenshot({ path: `${outputDirectory}/mobile-ship-happens-menu.png`, fullPage: true });
+  await page.getByRole("button", { name: "Codex", exact: true }).tap();
+  await page.getByRole("dialog", { name: "Ship Codex", exact: true }).waitFor();
+  const mobileScroll = await page.locator("#codex-scroll").evaluate((element) => {
+    const touchAction = getComputedStyle(element).touchAction;
+    element.scrollTop = element.scrollHeight;
+    const lastCard = document.querySelector(".codex-ship-card:last-child").getBoundingClientRect();
+    const visibleRegion = element.getBoundingClientRect();
+    return {
+      touchScrollEnabled: touchAction.includes("pan-y"),
+      scrolledToEnd: element.scrollTop > 0,
+      lastShipReachable: lastCard.bottom > visibleRegion.top && lastCard.top < visibleRegion.bottom
+    };
+  });
+  if (!mobileScroll.touchScrollEnabled || !mobileScroll.scrolledToEnd || !mobileScroll.lastShipReachable) {
+    throw new Error(`Mobile codex scrolling failed: ${JSON.stringify(mobileScroll)}`);
+  }
+  await page.locator("#codex-scroll").evaluate((element) => { element.scrollTop = 0; });
+  await page.screenshot({ path: `${outputDirectory}/mobile-ship-codex.png`, fullPage: true });
+  await page.getByRole("button", { name: "Back to Command", exact: true }).tap();
   await page.getByRole("button", { name: "Skirmish", exact: true }).tap();
   await page.getByRole("button", { name: /US NAVY/ }).tap();
   await page.getByText("BATTLESHIP", { exact: true }).waitFor();
@@ -214,6 +328,7 @@ try {
   await startServer();
   const browser = await chromium.launch({ headless: true });
   try {
+    await verifyShipCodex(browser);
     await verifyDesktop(browser);
     await verifyDefeat(browser);
     await verifyIslandCollision(browser);
