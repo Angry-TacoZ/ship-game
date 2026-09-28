@@ -3,7 +3,7 @@ import { mkdir, readFile } from "node:fs/promises";
 import { chromium, devices } from "playwright";
 
 const host = "127.0.0.1";
-const port = 4173;
+const port = Number(process.env.SHIP_GAME_VERIFY_PORT || 4173);
 const baseUrl = `http://${host}:${port}`;
 const outputDirectory = "output/playwright";
 
@@ -67,11 +67,13 @@ async function verifyShipCodex(browser) {
       `${ship.main.turrets} × ${ship.main.barrels} (${ship.main.turrets * ship.main.barrels} total)`,
       `${ship.main.damage} / ${ship.main.damage * ship.main.barrels} dmg`,
       `${(ship.main.reload / 1000).toFixed(1)}s / ${ship.main.range}`,
-      `${PLAYER_PROJECTILE_SPECS.main.speed} / tick · ${PLAYER_PROJECTILE_SPECS.main.radius}`,
+      `${getPlayerShellSpeed(nation, 'main').toLocaleString('en-US')} / tick · ${PLAYER_PROJECTILE_SPECS.main.radius}`,
+      `${(PLAYER_PROJECTILE_SPECS.main.spread * 180 / Math.PI).toLocaleString('en-US')}°`,
       `${ship.secondary.turrets}`,
       `${ship.secondary.damage} / ${(ship.secondary.reload / 1000).toFixed(1)}s`,
       `${ship.secondary.range}`,
-      `${PLAYER_PROJECTILE_SPECS.secondary.speed} / tick · ${PLAYER_PROJECTILE_SPECS.secondary.radius}`,
+      `${getPlayerShellSpeed(nation, 'secondary').toLocaleString('en-US')} / tick · ${PLAYER_PROJECTILE_SPECS.secondary.radius}`,
+      `${(PLAYER_PROJECTILE_SPECS.secondary.spread * 180 / Math.PI).toLocaleString('en-US')}°`,
       `${ship.hull.health} HP`,
       `${ship.hull.accel.toFixed(3)} / tick`, "1 / 0 of 150", "×1.00"
     ];
@@ -136,6 +138,71 @@ async function verifyDesktop(browser) {
   await page.close();
 }
 
+async function verifyNationShellSpeeds(browser) {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.goto(baseUrl, { waitUntil: 'networkidle' });
+  await page.getByText('Click to Engage', { exact: true }).click();
+  await page.getByRole('button', { name: 'Skirmish', exact: true }).click();
+  await page.getByRole('button', { name: /US NAVY/ }).click();
+  await page.getByText('BATTLESHIP', { exact: true }).waitFor();
+  const result = await page.evaluate(() => {
+    gameState = 'PAUSED';
+    enemies = [];
+    islands = [];
+    const step = 1000 / 60;
+    return ['USA', 'UK', 'Germany', 'Japan'].map(nation => {
+      const ship = new Player(nation);
+      ship.angle = ship.turretAngle = 0;
+      // Hull-speed refits must not change shell velocity.
+      ship.speedMult = 2;
+      return ['main', 'secondary'].map(battery => {
+        projectiles = [];
+        if (battery === 'main') ship.fireMain(0);
+        else ship.fireSec(0, { x: 1000, y: 32 });
+        const shell = projectiles[0];
+        const origin = { x: shell.x, y: shell.y };
+        const speeds = projectiles.map(p => Math.hypot(p.vx, p.vy));
+        for (let frame = 0; frame < 60; frame++) shell.update(step);
+        const distanceAfterSecond = Math.hypot(shell.x - origin.x, shell.y - origin.y);
+        let frames = 60;
+        while (Math.hypot(shell.x - origin.x, shell.y - origin.y) < 2000 && frames < 480) {
+          shell.update(step);
+          frames++;
+        }
+        const travelTime = frames * step;
+        const rangeReachable = speeds[0] * (8000 / 16.6) >= ship.config[battery].range;
+        return { nation, battery, speeds, count: projectiles.length, damage: shell.damage,
+          size: shell.size, distanceAfterSecond, travelTime, rangeReachable,
+          expectedCount: battery === 'main' ? ship.config.main.barrels : 1,
+          expectedDamage: ship.config[battery].damage,
+          expectedSize: PLAYER_PROJECTILE_SPECS[battery].radius };
+      });
+    }).flat();
+  });
+  const multipliers = { USA: 1, UK: 13 / 12, Germany: 7 / 6, Japan: 1.25 };
+  for (const battery of ['main', 'secondary']) {
+    const shots = result.filter(shot => shot.battery === battery);
+    const baseSpeed = battery === 'main' ? 11 : 15;
+    for (const [index, shot] of shots.entries()) {
+      const expectedSpeed = baseSpeed * multipliers[shot.nation];
+      if (shot.speeds.some(speed => Math.abs(speed - expectedSpeed) > 1e-9) ||
+          Math.abs(shot.distanceAfterSecond - expectedSpeed * (1000 / 16.6)) > 1e-7 ||
+          shot.count !== shot.expectedCount || shot.damage !== shot.expectedDamage ||
+          shot.size !== shot.expectedSize || !shot.rangeReachable ||
+          (index > 0 && shot.travelTime >= shots[index - 1].travelTime)) {
+        throw new Error(`Nation shell velocity regression: ${JSON.stringify(shot)}`);
+      }
+    }
+    const spread = shots[3].distanceAfterSecond / shots[0].distanceAfterSecond;
+    if (Math.abs(spread - 1.25) > 1e-9) throw new Error(`${battery} shell spread was ${spread}`);
+  }
+  if (errors.length) throw new Error(`Ballistics browser errors: ${errors.join('; ')}`);
+  console.log(`NATION SHELL SPEEDS: ${JSON.stringify(result)}`);
+  await page.close();
+}
+
 async function verifyDefeat(browser) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
   page.on("pageerror", (error) => { throw error; });
@@ -149,6 +216,138 @@ async function verifyDefeat(browser) {
   await page.getByRole("heading", { name: "Mission Lost", exact: true }).waitFor();
   await page.getByText("Hull integrity depleted.", { exact: false }).waitFor();
   await page.screenshot({ path: `${outputDirectory}/defeat-menu.png`, fullPage: true });
+  await page.close();
+}
+
+async function verifyRefits(browser, touch = false) {
+  const context = await browser.newContext(touch ? { ...devices['iPhone 13'] } : { viewport: { width: 1280, height: 720 } });
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.goto(baseUrl, { waitUntil: 'networkidle' });
+  await page.getByRole('button', { name: 'Click to Engage', exact: true }).click();
+  await page.getByRole('button', { name: 'Skirmish', exact: true }).click();
+  await page.getByRole('button', { name: /US NAVY/ }).click();
+  const offers = await page.evaluate(() => {
+    wave = 5;
+    enemies[0].x = 10000;
+    enemies = [enemies[0]];
+    window.__testOffer = seed => {
+      gameState = 'PLAYING';
+      seed = Math.imul(seed, 2654435761) >>> 0;
+      const random = Math.random;
+      Math.random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
+      try { showLevelUp(); } finally { Math.random = random; }
+      return [...document.querySelectorAll('#levelup-choices h3')].map(heading => heading.textContent);
+    };
+    window.__testAccuracyOffer = battery => {
+      const title = `${battery === 'main' ? 'Main' : 'Secondary'} Battery Accuracy`;
+      for (let seed = 1; seed <= 100; seed++) if (window.__testOffer(seed).includes(title)) return true;
+      return false;
+    };
+    window.__testSpread = () => {
+      const random = Math.random;
+      const ship = player;
+      ship.angle = ship.turretAngle = 0;
+      const result = {};
+      try {
+        for (const battery of ['main', 'secondary']) {
+          const angles = [];
+          for (const sample of [0, 0.999999]) {
+            Math.random = () => sample;
+            projectiles = [];
+            if (battery === 'main') ship.fireMain(0);
+            else ship.fireSec(0, { x: ship.x + 1000, y: ship.y + 32 });
+            angles.push(Math.atan2(projectiles[0].vy, projectiles[0].vx));
+          }
+          result[battery] = angles[1] - angles[0];
+        }
+      } finally { Math.random = random; }
+      projectiles = [];
+      return result;
+    };
+    const results = Array.from({ length: 100 }, (_, i) => window.__testOffer(i + 1));
+    const heldOffer = results[results.length - 1];
+    showLevelUp();
+    return { results, held: JSON.stringify(heldOffer) === JSON.stringify([...document.querySelectorAll('#levelup-choices h3')].map(h => h.textContent)) };
+  });
+  const pool = ['Advanced Ballistics', 'Automated Hoists', 'Reinforced Bulkheads', 'Main Battery Accuracy', 'Secondary Battery Accuracy'];
+  if (!offers.held || offers.results.some(offer => offer.length !== 3 || new Set(offer).size !== 3 || offer.some(title => !pool.includes(title))) ||
+      new Set(offers.results.map(offer => [...offer].sort().join('|'))).size !== 10) {
+    throw new Error(`Random refits failed: held=${offers.held}, combinations=${new Set(offers.results.map(offer => [...offer].sort().join('|'))).size}`);
+  }
+  if (!touch) {
+    await page.keyboard.press('Shift+Tab');
+    if (!(await page.evaluate(() => document.activeElement === document.querySelector('#levelup-choices button:last-child')))) throw new Error('Refit reverse focus wrap failed.');
+    await page.keyboard.press('Tab');
+    if (!(await page.evaluate(() => document.activeElement === document.querySelector('#levelup-choices button')))) throw new Error('Refit focus wrap failed.');
+  }
+  const baseline = await page.evaluate(() => window.__testSpread());
+  if (Math.abs(baseline.main - 0.04 * 0.999999) > 1e-9 || Math.abs(baseline.secondary / baseline.main - 0.5) > 1e-9) throw new Error('Starting spread cones are incorrect.');
+  for (const battery of ['main', 'secondary']) {
+    const before = await page.evaluate(() => window.__testSpread());
+    for (let pick = 1; pick <= 2; pick++) {
+      if (!(await page.evaluate(battery => window.__testAccuracyOffer(battery), battery))) throw new Error(`Could not offer ${battery} accuracy.`);
+      const choice = page.getByRole('button', { name: new RegExp(`^${battery === 'main' ? 'Main' : 'Secondary'} Battery Accuracy`) });
+      await page.screenshot({ path: `${outputDirectory}/${touch ? 'mobile' : 'desktop'}-accuracy-refits.png`, fullPage: true });
+      if (touch) await choice.tap();
+      else if (pick === 1) { await choice.focus(); await page.keyboard.press('Space'); }
+      else await choice.click();
+      const after = await page.evaluate(() => ({ spread: window.__testSpread(), wave, gameState, focus: document.activeElement.id }));
+      const other = battery === 'main' ? 'secondary' : 'main';
+      if (Math.abs(after.spread[battery] / before[battery] - 0.95 ** pick) > 1e-9 ||
+          Math.abs(after.spread[other] - before[other]) > 1e-9 || after.wave !== 5 || after.gameState !== 'PLAYING' || after.focus !== 'gameCanvas') {
+        throw new Error(`Accuracy stacking or battery isolation failed: ${JSON.stringify(after)}`);
+      }
+    }
+  }
+  const reset = await page.evaluate(() => { startGame(); gameState = 'PAUSED'; return [player.mainSpreadMult, player.secondarySpreadMult]; });
+  if (reset.some(value => value !== 1)) throw new Error('Accuracy refits carried into a new run.');
+  if (errors.length) throw new Error(`Refit browser errors: ${errors.join('; ')}`);
+  await context.close();
+}
+
+async function verifyRefitWaveContinuation(browser) {
+  const page = await browser.newPage();
+  await page.goto(baseUrl, { waitUntil: 'networkidle' });
+  await page.getByText('Click to Engage', { exact: true }).click();
+  await page.getByRole('button', { name: 'Skirmish', exact: true }).click();
+  await page.getByRole('button', { name: /US NAVY/ }).click();
+  for (let currentWave = 1; currentWave <= 4; currentWave++) {
+    const resumed = await page.evaluate(currentWave => {
+      wave = currentWave;
+      spawnWave(wave);
+      gameState = 'PLAYING';
+      enemies[0].health = 77;
+      const survivors = enemies;
+      const target = enemies[0];
+      player.xp = player.xpToNext;
+      player.update(TIME_STEP);
+      const pausedForRefit = gameState === 'UPGRADING';
+      const choice = document.querySelector('#levelup-choices button');
+      choice.click();
+      const refits = () => [player.damageMult, player.reloadMult, player.maxHealth, player.mainSpreadMult, player.secondarySpreadMult];
+      const afterFirst = refits();
+      choice.click();
+      const result = { wave, pausedForRefit, resumed: gameState === 'PLAYING',
+        survivorsPreserved: enemies === survivors && enemies.includes(target) && target.health === 77,
+        duplicateIgnored: JSON.stringify(afterFirst) === JSON.stringify(refits()) };
+      // Exercise the real delayed wave-clear reward after finishing the fight.
+      enemies = [];
+      handleWaveCleared();
+      return result;
+    }, currentWave);
+    if (resumed.wave !== currentWave || !resumed.pausedForRefit || !resumed.resumed || !resumed.survivorsPreserved || !resumed.duplicateIgnored) {
+      throw new Error(`XP refit skipped surviving targets: ${JSON.stringify(resumed)}`);
+    }
+    await page.getByRole('dialog', { name: 'Select Refit', exact: true }).waitFor();
+    await page.locator('#levelup-choices button').first().click();
+    const advanced = await page.evaluate(() => {
+      gameState = 'PAUSED';
+      return { wave, count: enemies.length, expected: WAVE_ROSTERS[wave].reduce((sum, entry) => sum + entry.count, 0) };
+    });
+    if (advanced.wave !== currentWave + 1 || advanced.count !== advanced.expected) throw new Error(`Cleared wave did not advance exactly once: ${JSON.stringify(advanced)}`);
+  }
   await page.close();
 }
 
@@ -274,8 +473,8 @@ async function verifyWave5LevelUp(browser) {
     result.afterFirstClick.wave !== 5 ||
     result.afterFirstClick.gameState !== "PLAYING" ||
     result.afterFirstClick.menuVisible ||
-    result.afterFirstClick.damageMult !== 1.2 ||
-    result.afterSecondClick.damageMult !== result.afterFirstClick.damageMult ||
+    JSON.stringify(result.afterFirstClick.refits) === JSON.stringify(result.before.refits) ||
+    JSON.stringify(result.afterSecondClick.refits) !== JSON.stringify(result.afterFirstClick.refits) ||
     result.afterSecondClick.gameState !== "PLAYING" ||
     result.afterSecondClick.menuVisible
   ) {
@@ -329,6 +528,10 @@ try {
   const browser = await chromium.launch({ headless: true });
   try {
     await verifyShipCodex(browser);
+    await verifyNationShellSpeeds(browser);
+    await verifyRefits(browser);
+    await verifyRefits(browser, true);
+    await verifyRefitWaveContinuation(browser);
     await verifyDesktop(browser);
     await verifyDefeat(browser);
     await verifyIslandCollision(browser);
