@@ -736,12 +736,34 @@ const ISLAND_LAYERS = [
 ];
 const ISLAND_SHADOW_OFFSET = { x: 20, y: 28 };
 const ISLAND_RENDER_PADDING = 12;
-const ISLAND_LAYER_STROKE_WIDTHS = [6, 6, 8, 8, 8];
+const ISLAND_MAX_SHORELINE_SCALE = 1.3;
+const ISLAND_LAYER_STROKE_WIDTHS = [5, 4, 4, 3, 3];
 const ISLAND_MAX_STROKE_PADDING = Math.max(...ISLAND_LAYER_STROKE_WIDTHS) / 2;
+const ISLAND_LAYER_INSETS = [0, 0.12, 0.13, 0.17, 0.15];
 
 function islandLayerRadius(isl, angle, layer) {
+    const layerIndex = ISLAND_LAYERS.indexOf(layer);
+    if (layerIndex === 0) {
+        const broadCoast = Math.sin(3 * angle + isl.seed1) * 0.12 + Math.cos(7 * angle + isl.seed2) * 0.09;
+        const smallCoves = Math.sin(11 * angle + isl.seed2 * 1.7) * 0.035 + Math.cos(17 * angle + isl.seed1 * 0.7) * 0.025;
+        return isl.radius * layer.r * (1 + broadCoast + smallCoves);
+    }
     const noise = (Math.sin(5 * angle + isl.seed1) + Math.cos(7 * angle + isl.seed2)) * layer.noise;
-    return isl.radius * layer.r * (1 + noise);
+    if (layerIndex < 0) return isl.radius * layer.r * (1 + noise);
+
+    // Inset each contour from its neighbor. Small independent variations
+    // break the repeated-ring look while keeping the elevations nested.
+    const broadVariation =
+        Math.sin((2 + layerIndex) * angle + isl.seed1 * 1.7 + layerIndex * 1.13) * 0.01 +
+        Math.cos((3 + layerIndex) * angle + isl.seed2 * 1.3 - layerIndex * 0.91) * 0.008;
+    const detailVariation =
+        Math.sin((8 + layerIndex * 2) * angle + isl.seed2 * 2.1 + layerIndex) * 0.004 +
+        Math.cos((11 + layerIndex * 2) * angle + isl.seed1 * 1.9 - layerIndex * 0.73) * 0.003;
+    const parentRadius = islandLayerRadius(isl, angle, ISLAND_LAYERS[layerIndex - 1]);
+    return Math.max(
+        isl.radius * 0.06,
+        parentRadius - isl.radius * ISLAND_LAYER_INSETS[layerIndex] + isl.radius * (noise * 0.08 + broadVariation + detailVariation)
+    );
 }
 
 function outerIslandShorelineRadius(isl, angle) {
@@ -777,6 +799,46 @@ function islandLayerGradient(context, centerX, centerY, radius, layer) {
     return gradient;
 }
 
+function islandDetailRandom(isl) {
+    let state = (Math.floor(Math.abs(isl.seed1 * 73856093 + isl.seed2 * 19349663)) >>> 0) || 1;
+    return () => {
+        state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+        return state / 4294967296;
+    };
+}
+
+function createIslandShoreMarks(isl, count = 150) {
+    const random = islandDetailRandom(isl);
+    const marks = [];
+    for (let i = 0; i < count; i++) {
+        const angle = random() * Math.PI * 2;
+        const outerRadius = outerIslandShorelineRadius(isl, angle);
+        const innerRadius = islandLayerRadius(isl, angle, ISLAND_LAYERS[1]);
+        const clearWidth = outerRadius - innerRadius - ISLAND_MAX_STROKE_PADDING * 2 - 8;
+        if (clearWidth < 10) continue;
+        const radius = innerRadius + ISLAND_MAX_STROKE_PADDING + 4 + random() * clearWidth;
+        marks.push({
+            x: Math.cos(angle) * radius,
+            y: Math.sin(angle) * radius,
+            angle: angle + Math.PI / 2 + (random() - 0.5) * 0.7,
+            length: 1.4 + random() * 2.8,
+            width: 0.7 + random() * 1.1,
+            light: random() > 0.48
+        });
+    }
+    return marks;
+}
+
+function traceHillMass(context, width, height) {
+    context.beginPath();
+    context.moveTo(-width * 0.94, height * 0.08);
+    context.bezierCurveTo(-width * 1.05, -height * 0.35, -width * 0.66, -height * 0.88, -width * 0.2, -height * 0.8);
+    context.bezierCurveTo(width * 0.1, -height * 1.03, width * 0.72, -height * 0.62, width * 0.88, -height * 0.18);
+    context.bezierCurveTo(width * 1.08, height * 0.18, width * 0.56, height * 0.85, width * 0.12, height * 0.76);
+    context.bezierCurveTo(-width * 0.28, height * 1.05, -width * 0.84, height * 0.62, -width * 0.94, height * 0.08);
+    context.closePath();
+}
+
 function includeIslandRenderCircle(bounds, x, y, radius) {
     bounds.minX = Math.min(bounds.minX, x - radius);
     bounds.maxX = Math.max(bounds.maxX, x + radius);
@@ -787,8 +849,8 @@ function includeIslandRenderCircle(bounds, x, y, radius) {
 function getIslandRenderGeometry(isl) {
     const radius = isl.radius;
     const outerLayer = ISLAND_LAYERS[0];
-    // The two noise terms can add up to twice the layer's noise amplitude.
-    const maximumShorelineRadius = radius * outerLayer.r * (1 + 2 * outerLayer.noise);
+    // Current coastline harmonics peak at 1.27x; reserve 1.30x for margin.
+    const maximumShorelineRadius = radius * ISLAND_MAX_SHORELINE_SCALE;
     const renderBounds = {
         minX: -maximumShorelineRadius - ISLAND_MAX_STROKE_PADDING,
         maxX: maximumShorelineRadius + ISLAND_MAX_STROKE_PADDING,
@@ -1181,8 +1243,18 @@ function initIslands() {
         const isl = { x: (Math.random()-0.5)*18000, y: (Math.random()-0.5)*18000, radius: radius, seed1: Math.random() * 10, seed2: Math.random() * 10, trees: [], rocks: [], hills: [] };
         const treeCount = Math.floor(radius / 12);
         for(let t=0; t<treeCount; t++) {
-            const tr = Math.random() * (radius * 0.62), ta = Math.random() * Math.PI * 2;
-            isl.trees.push({ x: Math.cos(ta)*tr, y: Math.sin(ta)*tr, size: 18+Math.random()*25, color: ['#14532d', '#166534', '#15803d'][Math.floor(Math.random()*3)] });
+            const cluster = t % 6;
+            const clusterAngle = isl.seed1 + cluster * 2.399963229728653;
+            const clusterRadius = radius * (0.15 + islandDetailRandom({ seed1: isl.seed1 + cluster, seed2: isl.seed2 })() * 0.29);
+            const jitter = radius * (0.025 + Math.random() * 0.085);
+            const treeAngle = clusterAngle + (Math.random() - 0.5) * 1.65;
+            const size = 18 + Math.random() * 25;
+            isl.trees.push({
+                x: Math.cos(clusterAngle) * clusterRadius + Math.cos(treeAngle) * jitter,
+                y: Math.sin(clusterAngle) * clusterRadius + Math.sin(treeAngle) * jitter,
+                size,
+                color: ['#14532d', '#166534', '#15803d'][Math.floor(Math.random() * 3)]
+            });
         }
         for (let h = 0; h < 5; h++) {
             const hr = radius * (0.12 + Math.random() * 0.3), ha = Math.random() * Math.PI * 2;
@@ -1214,6 +1286,18 @@ function renderIslandToBuffer(bCtx, isl, radius, centerX, centerY) {
         bCtx.stroke();
     });
 
+    isl.shoreMarks = createIslandShoreMarks(isl);
+    isl.shoreMarks.forEach(mark => {
+        bCtx.save();
+        bCtx.translate(centerX + mark.x, centerY + mark.y);
+        bCtx.rotate(mark.angle);
+        bCtx.fillStyle = mark.light ? 'rgba(255, 239, 190, 0.42)' : 'rgba(135, 91, 47, 0.3)';
+        bCtx.beginPath();
+        bCtx.ellipse(0, 0, mark.length, mark.width, 0, 0, Math.PI * 2);
+        bCtx.fill();
+        bCtx.restore();
+    });
+
     bCtx.save();
     bCtx.globalAlpha = 0.48;
     bCtx.strokeStyle = '#173d32';
@@ -1236,10 +1320,18 @@ function renderIslandToBuffer(bCtx, isl, radius, centerX, centerY) {
         bCtx.translate(centerX + hill.x + 10, centerY + hill.y + 14);
         bCtx.rotate(hill.angle);
         bCtx.fillStyle = 'rgba(12, 38, 29, 0.28)';
-        bCtx.beginPath(); bCtx.ellipse(0, 0, hill.width * 1.08, hill.height * 0.92, 0, 0, Math.PI * 2); bCtx.fill();
-        bCtx.translate(-10, -14);
-        bCtx.fillStyle = 'rgba(116, 180, 91, 0.22)';
-        bCtx.beginPath(); bCtx.ellipse(0, 0, hill.width, hill.height, 0, 0, Math.PI * 2); bCtx.fill();
+        traceHillMass(bCtx, hill.width * 1.08, hill.height * 0.96);
+        bCtx.fill();
+        bCtx.translate(-16, -22);
+        bCtx.fillStyle = 'rgba(131, 185, 99, 0.2)';
+        traceHillMass(bCtx, hill.width * 0.88, hill.height * 0.78);
+        bCtx.fill();
+        bCtx.strokeStyle = 'rgba(206, 218, 145, 0.16)';
+        bCtx.lineWidth = 2;
+        bCtx.beginPath();
+        bCtx.moveTo(-hill.width * 0.43, hill.height * 0.08);
+        bCtx.quadraticCurveTo(-hill.width * 0.04, -hill.height * 0.55, hill.width * 0.5, -hill.height * 0.2);
+        bCtx.stroke();
         bCtx.restore();
     });
 
@@ -1477,11 +1569,25 @@ function startGame() {
             buildIslandBuffer(fixture);
             const geometry = fixture.renderGeometry;
             let sampledMinX = Infinity, sampledMaxX = -Infinity, sampledMinY = Infinity, sampledMaxY = -Infinity;
+            let sampledMaximumShorelineRadius = 0;
             let shorelineMatchesCollision = true;
+            let terrainLayerNesting = true;
+            let terrainContourDiversity = 0;
             for (let angle = 0; angle <= Math.PI * 2 + 0.1; angle += Math.PI / 64) {
                 const shorelineRadius = outerIslandShorelineRadius(fixture, angle);
+                sampledMaximumShorelineRadius = Math.max(sampledMaximumShorelineRadius, shorelineRadius);
                 const renderedOuterRadius = islandLayerRadius(fixture, angle, ISLAND_LAYERS[0]);
                 shorelineMatchesCollision &&= Math.abs(renderedOuterRadius - shorelineRadius) < 1e-9;
+                let previousLayerRadius = renderedOuterRadius;
+                for (let layerIndex = 1; layerIndex < ISLAND_LAYERS.length; layerIndex++) {
+                    const layer = ISLAND_LAYERS[layerIndex];
+                    const layerRadius = islandLayerRadius(fixture, angle, layer);
+                    const legacyNoise = (Math.sin(5 * angle + fixture.seed1) + Math.cos(7 * angle + fixture.seed2)) * layer.noise;
+                    const legacyNormalizedRadius = 1 + legacyNoise;
+                    terrainLayerNesting &&= layerRadius < previousLayerRadius;
+                    terrainContourDiversity = Math.max(terrainContourDiversity, Math.abs(layerRadius / (fixture.radius * layer.r) - legacyNormalizedRadius));
+                    previousLayerRadius = layerRadius;
+                }
                 const shorelineX = Math.cos(angle) * shorelineRadius;
                 const shorelineY = Math.sin(angle) * shorelineRadius;
                 sampledMinX = Math.min(sampledMinX, shorelineX - geometry.strokePadding, shorelineX + geometry.shadowOffset.x);
@@ -1532,6 +1638,7 @@ function startGame() {
                     bottom: geometry.bufferHeight - geometry.maxRenderY
                 },
                 maximumShorelineRadius: geometry.maximumShorelineRadius,
+                sampledMaximumShorelineRadius,
                 shadowOffset: geometry.shadowOffset,
                 strokePadding: geometry.strokePadding,
                 requestedPadding: geometry.padding,
@@ -1540,6 +1647,9 @@ function startGame() {
                 positivePadding: Object.values(bufferPadding).every(padding => padding > 0),
                 theoreticalBoundsFit: geometry.minRenderX >= 0 && geometry.minRenderY >= 0 && geometry.maxRenderX <= geometry.bufferWidth && geometry.maxRenderY <= geometry.bufferHeight,
                 shorelineMatchesCollision,
+                terrainLayerNesting,
+                terrainContourDiversity,
+                shoreMarkCount: fixture.shoreMarks?.length ?? 0,
                 worldCenterPreserved,
                 originalIslandCount: originalIslands.length
             };

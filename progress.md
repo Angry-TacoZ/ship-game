@@ -72,3 +72,12 @@ Original prompt: Recover the playable browser naval game and continue its develo
 - Replaced the fixed `radius * 2.5` backing canvas with bounds derived from the `1.30 * radius` theoretical outer shoreline, maximum layer stroke, `(20, 28)` terrain shadow, tree/hill/rock extents, and 12px per-edge safety padding.
 - Stored per-island buffer centers and draw buffers at `island position - buffer center`, preserving the world-space shoreline center.
 - Extended `?verify-island-detail` to assert sampled and theoretical render bounds, positive edge padding, world-center placement, and the shared rendered/collision shoreline formula for the required radius-500 seeded fixture.
+
+## Natural island forms and surface texture
+
+- Diagnosed the island as overly concentric: each elevation reused the same 5/7-frequency radial noise, trees were spread evenly, and hills were ellipses.
+- Replaced the repeated star-shaped coast with lower-amplitude multi-frequency noise in the shared rendered/collision shoreline function; collision-clearance calculations are unchanged and the 1.30× render bound remains conservative.
+- Varied and nested interior elevation contours; softened layer outlines, clustered tree groves without consuming additional game randomness, added deterministic beach grain, and reshaped hills.
+- Extended the deterministic island fixture to require nested/divergent interior contours and at least 40 generated shoreline marks.
+- `npm.cmd run verify`, `node --check scripts/verify-project.mjs`, and `git diff --check` pass. The fixture reports nested contours, coastline agreement, world-center preservation, 150 shore marks, and positive calculated buffer padding; sampled shoreline max (602.67px) stays below the 650px render bound.
+- Inspected the deterministic detail screenshot and an interactive gameplay screenshot showing two naturally generated islands at the viewport edges; no buffer clipping or runtime errors observed.

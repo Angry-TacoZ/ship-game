@@ -390,11 +390,15 @@ async function verifyIslandDetail(browser) {
     result.rockCount < 1 ||
     result.treeCount < 1 ||
     result.shorelineRadius <= 0 ||
+    result.sampledMaximumShorelineRadius > result.maximumShorelineRadius ||
     !result.boundsFit ||
     !result.theoreticalBoundsFit ||
     !result.positivePadding ||
     !result.worldCenterPreserved ||
     !result.shorelineMatchesCollision ||
+    !result.terrainLayerNesting ||
+    result.terrainContourDiversity < 0.015 ||
+    result.shoreMarkCount < 40 ||
     Object.values(result.theoreticalPadding ?? {}).length !== 4 ||
     Object.values(result.theoreticalPadding ?? {}).some((padding) => padding < result.requestedPadding) ||
     result.minRenderX < 0 ||
