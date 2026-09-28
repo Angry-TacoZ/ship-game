@@ -47,6 +47,29 @@ Before changing movement or weapons, compare with this recovery baseline:
 - Main batteries initially stagger by 450 ms per turret, with navy-specific reloads of 11–21 seconds.
 - Turret traverse, wake particles, and synthesized gun sounds contribute to the feel.
 
+## Nation shell speeds
+
+Playable battleships use the same nation multiplier for main and secondary shell velocity:
+
+| Navy | Relative to US shells | Main speed / tick | Secondary speed / tick |
+| --- | --- | --- | --- |
+| USA | Baseline (slowest) | 11 | 15 |
+| UK | +8.3% | 11.917 | 16.25 |
+| Germany | +16.7% | 12.833 | 17.5 |
+| Japan | +25% (fastest) | 13.75 | 18.75 |
+
+The Ship Codex shows these live gameplay values and describes each navy's shell-speed position. Damage, reloads, targeting ranges, projectile radii, and hull movement retain their existing values. Enemy PT boats and destroyers retain their existing shell speed of 8. Shells still move in straight lines; this change adds velocity differences rather than ballistic arcs. Their existing 8-second lifetime allows faster shells to travel farther after firing, without increasing acquisition range.
+
+Run `npm.cmd run verify` for the full browser checks, including fired-shell velocity, movement over one second, travel-time ordering, and Codex content. If another application uses the default verification port, set `$env:SHIP_GAME_VERIFY_PORT='4185'` before running it.
+
+## Accuracy refits
+
+Each level-up offers three distinct random choices from the five-refit pool: damage, reload, hull health, main battery accuracy, and secondary battery accuracy. The offer stays fixed until a choice is made.
+
+An XP-earned refit pauses and resumes the current wave, preserving its surviving targets. A wave-clear refit advances to the next wave only after all targets are eliminated. Clearing wave 5 still ends the mission.
+
+Main guns retain their 0.04-radian full spread cone (about 2.292 degrees). Secondaries start with half that spread: 0.02 radians (about 1.146 degrees). Selecting a battery's accuracy refit multiplies only its current spread by 0.95. Three selections leave 85.7375% of its original spread, or about 14.3% less spread. These are accuracy improvements through tighter dispersion, not guaranteed hit-rate percentages or target-leading upgrades. Refits reset when starting a new run. The Codex lists both base spread cones and explains the random offers and independent stacking.
+
 ## Verification and existing limitations
 
 Recovery checks: JavaScript syntax passed; source hash matched the live shared game. Local Chrome checks reached the main menu, nation selection, rendered battlefield/HUD/radar, waypoint activation, and Escape pause. No JavaScript errors were reported at that checkpoint; Tailwind reports its standard development-CDN warning. This was a recovery smoke check, not full gameplay validation or a subjective feel comparison.

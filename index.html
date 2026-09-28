@@ -162,6 +162,8 @@
         .codex-stat-row dd { flex: 0 0 auto; margin: 0; color: #f8fafc; font-weight: 800; text-align: right; }
         .codex-note { color: #94a3b8; font-size: .65rem; line-height: 1.35; }
         button:focus-visible, [tabindex="0"]:focus-visible { outline: 3px solid #38bdf8; outline-offset: 3px; }
+        #levelup-menu { max-height: calc(100dvh - 48px); overflow-y: auto; touch-action: pan-y; padding: 16px; background: rgba(2, 6, 23, 0.94); border: 1px solid #334155; border-radius: 16px; }
+        #levelup-choices { gap: 16px; }
         .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
         @media (max-width: 1050px) { .codex-fleet { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
         @media (max-width: 620px) {
@@ -213,7 +215,7 @@
         <button id="engage-prompt" type="button" class="absolute bottom-20 left-1/2 -translate-x-1/2 text-slate-400 font-mono tracking-[0.5em] animate-pulse cursor-pointer z-[110]" onclick="transitionToMainMenu()">Click to Engage</button>
     </div>
 
-    <canvas id="gameCanvas" class="pointer-events-auto" width="1702" height="1442"></canvas>
+    <canvas id="gameCanvas" class="pointer-events-auto" tabindex="-1" width="1702" height="1442"></canvas>
 
     <div id="fps-counter" class="hidden">FPS: --</div>
 
@@ -311,7 +313,7 @@
             <div id="codex-scroll" class="codex-scroll pointer-events-auto" role="region" aria-label="Playable ships and statistics" tabindex="0">
                 <div id="codex-fleet" class="codex-fleet"></div>
             </div>
-            <p class="codex-note">Base values are before refits. Main salvo damage assumes every barrel hits; projectile speeds, radii, and ranges use game units. Main turrets begin firing 0.45 seconds apart; secondaries auto-fire inside their side arcs.</p>
+            <p class="codex-note">Base values are before refits. Main salvo damage assumes every barrel hits; projectile speeds, radii, and ranges use game units. Main turrets begin firing 0.45 seconds apart; secondaries auto-fire inside their side arcs. Each level-up offers three random refits. Accuracy refits reduce the chosen battery's current shot spread by 5% per pick and stack independently.</p>
         </section>
 
         <div id="options-menu" class="max-w-md w-full menu-card hidden">
@@ -366,8 +368,8 @@
             <button onclick="confirmEndRun()" class="w-full btn-primary pointer-events-auto">Return to Command</button>
         </div>
 
-        <div id="levelup-menu" class="hidden max-w-4xl w-full">
-            <h2 class="text-4xl font-black mb-10 text-center italic text-sky-400 tracking-widest uppercase">Select Refit</h2>
+        <div id="levelup-menu" class="hidden max-w-4xl w-full pointer-events-auto" role="dialog" aria-modal="true" aria-labelledby="levelup-title">
+            <h2 id="levelup-title" class="text-4xl font-black mb-10 text-center italic text-sky-400 tracking-widest uppercase">Select Refit</h2>
             <div id="levelup-choices" class="grid grid-cols-1 md:grid-cols-3 gap-8"></div>
         </div>
 
@@ -405,16 +407,21 @@ const TIME_STEP = 1000 / 60;
 let showFPS = false, frameCount = 0, fpsLastTime = 0, currentFPS = 0, isMobileUI = false, autoThrust = false;
 
 const NATIONS = {
-    'USA': { country: 'United States', navy: 'US Navy', doctrine: 'Rapid Fire Loadout', doctrineSummary: 'Balanced main guns backed by ten quick-cycling secondary mounts.', main: { reload: 14000, damage: 650, range: 3800, turrets: 3, barrels: 3 }, secondary: { reload: 800, damage: 15, range: 1200, turrets: 10 }, hull: { health: 2500, speed: 0.35, accel: 0.06, color: '#475569' } },
-    'Japan': { country: 'Japan', navy: 'Imperial Japanese Navy', doctrine: 'Heavy Strike Doctrine', doctrineSummary: 'The longest-ranged, hardest-hitting main battery, with slower reloads and fewer secondary mounts.', main: { reload: 21000, damage: 850, range: 4800, turrets: 5, barrels: 2 }, secondary: { reload: 1100, damage: 45, range: 1400, turrets: 4 }, hull: { health: 2800, speed: 0.3, accel: 0.045, color: '#334155' } },
-    'Germany': { country: 'Germany', navy: 'Kriegsmarine', doctrine: 'Brawler Armor', doctrineSummary: 'The largest starting hull, rapid main reloads, and dense secondary coverage at close range.', main: { reload: 12000, damage: 550, range: 3400, turrets: 4, barrels: 2 }, secondary: { reload: 600, damage: 25, range: 2200, turrets: 14 }, hull: { health: 3200, speed: 0.38, accel: 0.075, color: '#4b5563' } },
-    'UK': { country: 'United Kingdom', navy: 'Royal Navy', doctrine: 'Barrage Focus', doctrineSummary: 'Five triple main turrets and twelve secondary mounts deliver the broadest volume of fire.', main: { reload: 11000, damage: 400, range: 3200, turrets: 5, barrels: 3 }, secondary: { reload: 1000, damage: 12, range: 1100, turrets: 12 }, hull: { health: 2300, speed: 0.42, accel: 0.09, color: '#374151' } }
+    'USA': { country: 'United States', navy: 'US Navy', shellSpeedMult: 1, doctrine: 'Rapid Fire Loadout', doctrineSummary: 'Balanced main guns backed by ten quick-cycling secondary mounts. The slowest shells in the fleet.', main: { reload: 14000, damage: 650, range: 3800, turrets: 3, barrels: 3 }, secondary: { reload: 800, damage: 15, range: 1200, turrets: 10 }, hull: { health: 2500, speed: 0.35, accel: 0.06, color: '#475569' } },
+    'Japan': { country: 'Japan', navy: 'Imperial Japanese Navy', shellSpeedMult: 1.25, doctrine: 'Heavy Strike Doctrine', doctrineSummary: 'The longest-ranged, hardest-hitting main battery, with slower reloads and fewer secondary mounts. The fastest shells: 25% faster than US shells.', main: { reload: 21000, damage: 850, range: 4800, turrets: 5, barrels: 2 }, secondary: { reload: 1100, damage: 45, range: 1400, turrets: 4 }, hull: { health: 2800, speed: 0.3, accel: 0.045, color: '#334155' } },
+    'Germany': { country: 'Germany', navy: 'Kriegsmarine', shellSpeedMult: 7 / 6, doctrine: 'Brawler Armor', doctrineSummary: 'The largest starting hull, rapid main reloads, and dense secondary coverage at close range. Faster shells than the US and UK; slower than Japan.', main: { reload: 12000, damage: 550, range: 3400, turrets: 4, barrels: 2 }, secondary: { reload: 600, damage: 25, range: 2200, turrets: 14 }, hull: { health: 3200, speed: 0.38, accel: 0.075, color: '#4b5563' } },
+    'UK': { country: 'United Kingdom', navy: 'Royal Navy', shellSpeedMult: 13 / 12, doctrine: 'Barrage Focus', doctrineSummary: 'Five triple main turrets and twelve secondary mounts deliver the broadest volume of fire. Shells travel faster than the US, but slower than Germany and Japan.', main: { reload: 11000, damage: 400, range: 3200, turrets: 5, barrels: 3 }, secondary: { reload: 1000, damage: 12, range: 1100, turrets: 12 }, hull: { health: 2300, speed: 0.42, accel: 0.09, color: '#374151' } }
 };
 
 const PLAYER_PROJECTILE_SPECS = {
-    main: { speed: 11, radius: 13 },
-    secondary: { speed: 15, radius: 5 }
+    main: { speed: 11, radius: 13, spread: 0.04 },
+    secondary: { speed: 15, radius: 5, spread: 0.02 }
 };
+
+// Evenly spaced nation speeds: Japan is 25% faster than the US baseline.
+function getPlayerShellSpeed(nation, battery) {
+    return PLAYER_PROJECTILE_SPECS[battery].speed * NATIONS[nation].shellSpeedMult;
+}
 
 const ENEMY_SPECS = {
     'PT_BOAT': { radius: 15, health: 120, speed: 6.0, damage: 14, reload: 2000, range: 600, turrets: 1, scrap: 20 },
@@ -503,7 +510,8 @@ function renderShipCodex() {
                     ${statRow('Turrets / barrels', `${ship.main.turrets} × ${ship.main.barrels} (${number(ship.main.turrets * ship.main.barrels)} total)`)}
                     ${statRow('Shell / turret salvo', `${number(ship.main.damage)} / ${number(mainSalvo)} dmg`)}
                     ${statRow('Reload / range', `${seconds(ship.main.reload)}s / ${number(ship.main.range)}`)}
-                    ${statRow('Shell speed / radius', `${PLAYER_PROJECTILE_SPECS.main.speed} / tick · ${PLAYER_PROJECTILE_SPECS.main.radius}`)}
+                    ${statRow('Shell speed / radius', `${number(getPlayerShellSpeed(nation, 'main'))} / tick · ${PLAYER_PROJECTILE_SPECS.main.radius}`)}
+                    ${statRow('Shot spread (full cone)', `${number(PLAYER_PROJECTILE_SPECS.main.spread * 180 / Math.PI)}°`)}
                 </dl>
             </section>
             <section class="codex-stat-section" aria-label="Secondary battery">
@@ -512,7 +520,8 @@ function renderShipCodex() {
                     ${statRow('Gun mounts', number(ship.secondary.turrets))}
                     ${statRow('Damage / mount reload', `${number(ship.secondary.damage)} / ${seconds(ship.secondary.reload)}s`)}
                     ${statRow('Range', number(ship.secondary.range))}
-                    ${statRow('Shell speed / radius', `${PLAYER_PROJECTILE_SPECS.secondary.speed} / tick · ${PLAYER_PROJECTILE_SPECS.secondary.radius}`)}
+                    ${statRow('Shell speed / radius', `${number(getPlayerShellSpeed(nation, 'secondary'))} / tick · ${PLAYER_PROJECTILE_SPECS.secondary.radius}`)}
+                    ${statRow('Shot spread (full cone)', `${number(PLAYER_PROJECTILE_SPECS.secondary.spread * 180 / Math.PI)}°`)}
                 </dl>
             </section>
             <section class="codex-stat-section" aria-label="Starting statistics">
@@ -864,6 +873,7 @@ class Player {
         this.x = 0; this.y = 0; this.vx = 0; this.vy = 0; this.angle = -Math.PI / 2; this.turretAngle = -Math.PI / 2;
         this.level = 1; this.xp = 0; this.xpToNext = 150; this.health = this.config.hull.health; this.maxHealth = this.health;
         this.damageMult = 1.0; this.reloadMult = 1.0; this.speedMult = 1.0; this.traverseSpeed = 0.04;
+        this.mainSpreadMult = 1.0; this.secondarySpreadMult = 1.0;
         this.mainTimers = new Array(this.config.main.turrets).fill(0).map((_, i) => i * 450);
         this.secTimers = new Array(this.config.secondary.turrets || 8).fill(0);
         this.radius = 50; this.highlight = '#38bdf8'; this.waypoint = null;
@@ -917,7 +927,7 @@ class Player {
     }
     fireMain(idx) {
         const off = (idx - (this.config.main.turrets-1)/2) * (this.radius * 0.7), tX = this.x + Math.cos(this.angle)*off, tY = this.y + Math.sin(this.angle)*off;
-        for(let i=0; i<this.config.main.barrels; i++) projectiles.push(new Projectile(tX, tY, this.turretAngle + (Math.random()-0.5)*0.04, true, PLAYER_PROJECTILE_SPECS.main.speed, this.config.main.damage * this.damageMult, '#ef4444', PLAYER_PROJECTILE_SPECS.main.radius));
+        for(let i=0; i<this.config.main.barrels; i++) projectiles.push(new Projectile(tX, tY, this.turretAngle + (Math.random()-0.5)*PLAYER_PROJECTILE_SPECS.main.spread*this.mainSpreadMult, true, getPlayerShellSpeed(this.nation, 'main'), this.config.main.damage * this.damageMult, '#ef4444', PLAYER_PROJECTILE_SPECS.main.radius));
         SoundManager.playMainGun();
     }
     getSecondaryTarget(idx, targets = enemies) {
@@ -933,7 +943,8 @@ class Player {
     fireSec(idx, target) {
         const side = idx % 2 === 0 ? 1 : -1, step = Math.floor(idx / 2), relX = -20 + step * 10, relY = side * 32;
         const tX = this.x + Math.cos(this.angle) * relX - Math.sin(this.angle) * relY, tY = this.y + Math.sin(this.angle) * relX + Math.cos(this.angle) * relY;
-        projectiles.push(new Projectile(tX, tY, Math.atan2(target.y - tY, target.x - tX), true, PLAYER_PROJECTILE_SPECS.secondary.speed, this.config.secondary.damage * this.damageMult, '#fff', PLAYER_PROJECTILE_SPECS.secondary.radius));
+        const shotAngle = Math.atan2(target.y - tY, target.x - tX) + (Math.random()-0.5)*PLAYER_PROJECTILE_SPECS.secondary.spread*this.secondarySpreadMult;
+        projectiles.push(new Projectile(tX, tY, shotAngle, true, getPlayerShellSpeed(this.nation, 'secondary'), this.config.secondary.damage * this.damageMult, '#fff', PLAYER_PROJECTILE_SPECS.secondary.radius));
         SoundManager.playSecondary();
     }
     draw() {
@@ -1124,7 +1135,12 @@ function drawMinimap() {
 function handleWaveCleared() {
     gameState = 'WAVE_END';
     if (wave >= 5) showSubMenu('victory-menu');
-    else setTimeout(showLevelUp, 2000);
+    else {
+        const clearedPlayer = player, clearedWave = wave;
+        setTimeout(() => {
+            if (player === clearedPlayer && wave === clearedWave && gameState === 'WAVE_END') showLevelUp();
+        }, 2000);
+    }
 }
 
 /** * ==========================================
@@ -1140,7 +1156,7 @@ function gameLoop(timestamp) {
     if (activeVisualStates.includes(gameState)) {
         if (gameState === 'PLAYING') {
             accumulator += dt;
-            while (accumulator >= TIME_STEP) {
+            while (accumulator >= TIME_STEP && gameState === 'PLAYING') {
                 if (player) player.update(TIME_STEP);
                 enemies.forEach((e, i) => { e.update(TIME_STEP); if (e.health <= 0) { enemies.splice(i,1); for(let j=0; j<6; j++) drops.push(new Drop(e.x, e.y, 25)); for(let k=0; k<12; k++) particles.push(new Particle(e.x, e.y, (Math.random()-0.5)*12, (Math.random()-0.5)*12, 1200, '#475569', 3+Math.random()*5)); } });
                 projectiles.forEach((p, i) => { p.update(TIME_STEP); if (p.life <= 0) projectiles.splice(i,1); });
@@ -1190,6 +1206,7 @@ function updateDOM() {
 
 function showLevelUp() {
     if (gameState === 'UPGRADING') return;
+    const advanceWaveOnSelection = gameState === 'WAVE_END' && enemies.length === 0;
     gameState = 'UPGRADING';
     showSubMenu('levelup-menu');
     const container = document.getElementById('levelup-choices');
@@ -1197,25 +1214,39 @@ function showLevelUp() {
     const upgrades = [
         { t: "Advanced Ballistics", d: "+20% Main Battery Damage", v: () => player.damageMult += 0.2 },
         { t: "Automated Hoists", d: "-15% Reload Time", v: () => player.reloadMult *= 0.85 },
-        { t: "Reinforced Bulkheads", d: "+20% Max Health", v: () => { player.maxHealth *= 1.2; player.health = player.maxHealth; } }
+        { t: "Reinforced Bulkheads", d: "+20% Max Health", v: () => { player.maxHealth *= 1.2; player.health = player.maxHealth; } },
+        { t: "Main Battery Accuracy", d: "+5% accuracy: 5% less current main shot spread. Stacks.", v: () => player.mainSpreadMult *= 0.95 },
+        { t: "Secondary Battery Accuracy", d: "+5% accuracy: 5% less current secondary shot spread. Stacks.", v: () => player.secondarySpreadMult *= 0.95 }
     ];
-    upgrades.forEach(u => {
+    // Sample three distinct refits without favoring a particular pool position.
+    for (let i = upgrades.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [upgrades[i], upgrades[j]] = [upgrades[j], upgrades[i]];
+    }
+    upgrades.slice(0, 3).forEach(u => {
         const btn = document.createElement('button');
         btn.className = 'menu-card hover:border-sky-400 transition-all text-left pointer-events-auto';
         btn.innerHTML = `<h3 class="text-xl font-black mb-2">${u.t}</h3><p class="text-sm text-slate-400">${u.d}</p>`;
         btn.onclick = () => {
             if (gameState !== 'UPGRADING') return;
             u.v();
-            nextWave();
+            if (advanceWaveOnSelection) nextWave();
+            else {
+                document.getElementById('menu-overlay').classList.add('hidden');
+                gameState = 'PLAYING'; lastTime = performance.now();
+                canvas.focus({ preventScroll: true });
+            }
         };
         container.appendChild(btn);
     });
+    container.querySelector('button').focus();
 }
 
 function nextWave() {
-    if (wave >= 5) {
+    if (wave >= 5 || enemies.length > 0) {
         document.getElementById('menu-overlay').classList.add('hidden');
         gameState = 'PLAYING'; lastTime = performance.now();
+        canvas.focus({ preventScroll: true });
         return;
     }
     wave++;
@@ -1223,6 +1254,7 @@ function nextWave() {
     document.getElementById('wave-display').innerText = `WAVE ${wave}`;
     spawnWave(wave);
     gameState = 'PLAYING'; lastTime = performance.now();
+    canvas.focus({ preventScroll: true });
 }
 
 function spawnWave(waveNumber) {
@@ -1426,6 +1458,8 @@ function startGame() {
                 wave,
                 gameState,
                 damageMult: player.damageMult,
+                refits: { damage: player.damageMult, reload: player.reloadMult, health: player.maxHealth,
+                    mainSpread: player.mainSpreadMult, secondarySpread: player.secondarySpreadMult },
                 menuVisible: !document.getElementById('menu-overlay').classList.contains('hidden') &&
                     !document.getElementById('levelup-menu').classList.contains('hidden')
             });
@@ -1475,6 +1509,15 @@ window.addEventListener('resize', resize); resize();
 window.addEventListener('keydown', e => {
     keys[e.code] = true;
     const codex = document.getElementById('codex-menu');
+    if (gameState === 'UPGRADING') {
+        if (e.code === 'Tab') {
+            const choices = [...document.querySelectorAll('#levelup-choices button')];
+            const first = choices[0], last = choices[choices.length - 1];
+            if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+            else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+        }
+        return;
+    }
     if (!codex.classList.contains('hidden')) {
         if (e.code === 'Escape') {
             e.preventDefault();
