@@ -4,9 +4,14 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "verify": "node scripts/verify-project.mjs"
+    "build": "node scripts/build-pixi.mjs",
+    "verify": "npm run build && node scripts/verify-project.mjs"
   },
   "devDependencies": {
+    "esbuild": "0.28.2",
     "playwright": "^1.63.0"
+  },
+  "dependencies": {
+    "pixi.js": "8.21.0"
   }
 }

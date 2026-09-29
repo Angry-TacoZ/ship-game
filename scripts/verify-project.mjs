@@ -19,7 +19,8 @@ const server = createServer(async (_request, response) => {
       '/assets/art/island.png': ['assets/art/island.png', 'image/png'],
       '/assets/art/island-lowland.png': ['assets/art/island-lowland.png', 'image/png'],
       '/assets/art/island-spine.png': ['assets/art/island-spine.png', 'image/png'],
-      '/assets/art/ship-deck.png': ['assets/art/ship-deck.png', 'image/png']
+      '/assets/art/ship-deck.png': ['assets/art/ship-deck.png', 'image/png'],
+      '/assets/generated/pixi-renderer.js': ['assets/generated/pixi-renderer.js', 'text/javascript; charset=utf-8']
     };
     const file = files[pathname];
     if (!file) { response.writeHead(404); response.end('Not found'); return; }
@@ -697,6 +698,215 @@ async function verifyIslandDetail(browser) {
   await page.close();
 }
 
+async function verifyRendererExperiment(browser) {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.goto(`${baseUrl}/?renderer-lab&profile-render`, { waitUntil: 'networkidle' });
+  await page.getByText('Click to Engage', { exact: true }).click();
+  await page.getByRole('button', { name: 'Skirmish', exact: true }).click();
+  await page.getByRole('button', { name: /US NAVY/ }).click();
+  await page.getByText('BATTLESHIP', { exact: true }).waitFor();
+  await page.evaluate(() => window.RendererExperiment.ready);
+  await page.waitForFunction(() => !!window.RenderProfile);
+  await page.evaluate(() => { RenderProfile.fixture(5, true, 0.45); gameState = 'PAUSED'; });
+  await page.waitForTimeout(150);
+  await page.screenshot({ path: `${outputDirectory}/renderer-canvas-gameplay.png`, fullPage: true });
+  const before = await page.evaluate(() => ({ x: player.x, y: player.y, wave, loop: animationLoopStarts }));
+  await page.evaluate(() => window.RendererExperiment.switchTo('PixiJS/WebGL'));
+  await page.waitForFunction(() => window.RendererExperiment.diagnostics().renderer === 'PixiJS/WebGL' &&
+    document.querySelector('#gameCanvas').style.visibility === 'hidden');
+  await page.waitForTimeout(300);
+  const pixi = await page.evaluate(() => ({ ...window.RendererExperiment.diagnostics(),
+    webgl: !!(document.querySelector('.pixi-renderer-canvas')?.getContext('webgl2') || document.querySelector('.pixi-renderer-canvas')?.getContext('webgl')),
+    world: { x: player.x, y: player.y, wave, loop: animationLoopStarts },
+    canvasVisible: getComputedStyle(document.querySelector('#gameCanvas')).visibility }));
+  if (!pixi.webgl || !pixi.visibleIslands || !pixi.visibleShips || pixi.canvasVisible !== 'hidden' ||
+      pixi.world.wave !== before.wave || pixi.world.loop !== before.loop) {
+    throw new Error(`Pixi renderer activation/parity failed: ${JSON.stringify({ before, pixi })}`);
+  }
+  await page.screenshot({ path: `${outputDirectory}/renderer-pixi-gameplay.png`, fullPage: true });
+  await page.setViewportSize({ width: 1100, height: 700 });
+  await page.waitForFunction(() => document.querySelector('.pixi-renderer-canvas')?.width === 1100);
+  const resized = await page.evaluate(() => ({ x: player.x, y: player.y, wave, width: document.querySelector('.pixi-renderer-canvas').width }));
+  if (resized.width !== 1100 || resized.x !== pixi.world.x || resized.y !== pixi.world.y || resized.wave !== before.wave) {
+    throw new Error(`Pixi resize changed the simulation or missed the viewport: ${JSON.stringify(resized)}`);
+  }
+  const input = await page.evaluate(() => {
+    gameState = 'PLAYING'; player.waypoint = null;
+    document.querySelector('.pixi-renderer-canvas').dispatchEvent(new MouseEvent('mousedown',
+      { bubbles: true, clientX: 400, clientY: 350, button: 2 }));
+    gameState = 'PAUSED';
+    return { waypoint: player.waypoint, expectedX: (400 - innerWidth / 2) / zoom + player.x,
+      expectedY: (350 - innerHeight / 2) / zoom + player.y };
+  });
+  if (!input.waypoint || Math.abs(input.waypoint.x - input.expectedX) > 1e-8 ||
+      Math.abs(input.waypoint.y - input.expectedY) > 1e-8) throw new Error(`Pixi input target changed waypoint mapping: ${JSON.stringify(input)}`);
+  await page.evaluate(() => window.RendererExperiment.restart());
+  await page.waitForFunction(() => window.RendererExperiment.diagnostics().renderer === 'PixiJS/WebGL' &&
+    document.querySelectorAll('.pixi-renderer-canvas').length === 1);
+  await page.evaluate(() => window.RendererExperiment.forceContextLoss());
+  await page.waitForFunction(() => window.RendererExperiment.diagnostics().contextLossFallbacks > 0, { timeout: 5000 });
+  if ((await page.evaluate(() => window.RendererExperiment.diagnostics())).contextLossFallbacks < 1) {
+    throw new Error('Canvas fallback was not shown after WebGL context loss.');
+  }
+  await page.evaluate(() => { if (window.RendererExperiment.diagnostics().contextLost) window.RendererExperiment.forceContextRestore(); });
+  await page.waitForFunction(() => window.RendererExperiment.diagnostics().contextLost === false &&
+    window.RendererExperiment.diagnostics().renderer === 'PixiJS/WebGL', { timeout: 10000 });
+  const restored = await page.evaluate(() => {
+    const pixiCanvas = document.querySelector('.pixi-renderer-canvas');
+    const pixiStyle = pixiCanvas && getComputedStyle(pixiCanvas);
+    return { ...window.RendererExperiment.diagnostics(), pixiCanvasExists: !!pixiCanvas,
+      pixiDisplay: pixiStyle?.display, pixiVisibility: pixiStyle?.visibility,
+      canvas2dVisibility: getComputedStyle(document.querySelector('#gameCanvas')).visibility };
+  });
+  if (restored.contextLost !== false || restored.renderer !== 'PixiJS/WebGL' ||
+      restored.canvas2dVisibility !== 'hidden' || !restored.pixiCanvasExists ||
+      restored.pixiDisplay === 'none' || restored.pixiVisibility === 'hidden') {
+    throw new Error(`Pixi canvas did not become renderable after context restoration: ${JSON.stringify(restored)}`);
+  }
+  const inputAfterRestore = await page.evaluate(() => {
+    gameState = 'PLAYING'; player.waypoint = null;
+    document.querySelector('.pixi-renderer-canvas').dispatchEvent(new MouseEvent('mousedown',
+      { bubbles: true, clientX: 430, clientY: 330, button: 2 }));
+    gameState = 'PAUSED';
+    return { waypoint: player.waypoint, expectedX: (430 - innerWidth / 2) / zoom + player.x,
+      expectedY: (330 - innerHeight / 2) / zoom + player.y };
+  });
+  if (!inputAfterRestore.waypoint || Math.abs(inputAfterRestore.waypoint.x - inputAfterRestore.expectedX) > 1e-8 ||
+      Math.abs(inputAfterRestore.waypoint.y - inputAfterRestore.expectedY) > 1e-8) {
+    throw new Error(`Pixi input target was not restored after context recovery: ${JSON.stringify(inputAfterRestore)}`);
+  }
+  const fallbackCountBeforeExplicitCanvas = (await page.evaluate(() => window.RendererExperiment.diagnostics())).contextLossFallbacks;
+  await page.evaluate(() => window.RendererExperiment.forceContextLoss());
+  await page.waitForFunction(() => document.querySelector('.pixi-renderer-canvas')
+    ?.getContext('webgl2')?.isContextLost(), { timeout: 5000 });
+  const raceLost = await page.evaluate(() => {
+    const pixiCanvas = document.querySelector('.pixi-renderer-canvas');
+    const nativeEventHandled = window.RendererExperiment.diagnostics().contextLost;
+    if (!nativeEventHandled) pixiCanvas.dispatchEvent(new Event('webglcontextlost', { cancelable: true }));
+    return { ...window.RendererExperiment.diagnostics(), nativeEventHandled,
+      canvas2dVisibility: getComputedStyle(document.querySelector('#gameCanvas')).visibility,
+      pixiDisplay: getComputedStyle(pixiCanvas).display };
+  });
+  if (raceLost.contextLost !== true || raceLost.renderer !== 'Canvas2D' ||
+      raceLost.contextLossFallbacks <= fallbackCountBeforeExplicitCanvas ||
+      raceLost.canvas2dVisibility !== 'visible' || raceLost.pixiDisplay !== 'none') {
+    throw new Error(`Pixi loss did not establish the expected temporary Canvas2D fallback: ${JSON.stringify(raceLost)}`);
+  }
+  await page.evaluate(() => window.RendererExperiment.switchTo('Canvas2D'));
+  await page.evaluate(() => window.RendererExperiment.forceContextRestore());
+  await page.waitForFunction(() => !document.querySelector('.pixi-renderer-canvas')
+    ?.getContext('webgl2')?.isContextLost(), { timeout: 10000 });
+  await page.waitForTimeout(100);
+  const explicitCanvasRestored = await page.evaluate(() => {
+    const pixiCanvas = document.querySelector('.pixi-renderer-canvas');
+    const nativeEventHandled = !window.RendererExperiment.diagnostics().contextLost;
+    if (!nativeEventHandled) pixiCanvas.dispatchEvent(new Event('webglcontextrestored'));
+    return { ...window.RendererExperiment.diagnostics(), nativeEventHandled,
+      canvas2dVisibility: getComputedStyle(document.querySelector('#gameCanvas')).visibility,
+      pixiDisplay: getComputedStyle(pixiCanvas).display };
+  });
+  if (explicitCanvasRestored.contextLost !== false || explicitCanvasRestored.renderer !== 'Canvas2D' ||
+      explicitCanvasRestored.canvas2dVisibility !== 'visible' || explicitCanvasRestored.pixiDisplay !== 'none') {
+    throw new Error(`WebGL restore overrode the explicit Canvas2D choice: ${JSON.stringify(explicitCanvasRestored)}`);
+  }
+  const explicitCanvasInput = await page.evaluate(() => {
+    gameState = 'PLAYING'; player.waypoint = null;
+    document.querySelector('#gameCanvas').dispatchEvent(new MouseEvent('mousedown',
+      { bubbles: true, clientX: 440, clientY: 325, button: 2 }));
+    gameState = 'PAUSED';
+    return { waypoint: player.waypoint, expectedX: (440 - innerWidth / 2) / zoom + player.x,
+      expectedY: (325 - innerHeight / 2) / zoom + player.y };
+  });
+  if (!explicitCanvasInput.waypoint || Math.abs(explicitCanvasInput.waypoint.x - explicitCanvasInput.expectedX) > 1e-8 ||
+      Math.abs(explicitCanvasInput.waypoint.y - explicitCanvasInput.expectedY) > 1e-8) {
+    throw new Error(`Canvas2D input target was not retained after explicit selection during recovery: ${JSON.stringify(explicitCanvasInput)}`);
+  }
+  await page.evaluate(() => window.RendererExperiment.switchTo('Canvas2D'));
+  const canvas2dRestored = await page.evaluate(() => ({
+    renderer: window.RendererExperiment.diagnostics().renderer,
+    canvas2dVisibility: getComputedStyle(document.querySelector('#gameCanvas')).visibility,
+    pixiDisplay: getComputedStyle(document.querySelector('.pixi-renderer-canvas')).display
+  }));
+  if (canvas2dRestored.renderer !== 'Canvas2D' || canvas2dRestored.canvas2dVisibility !== 'visible' ||
+      canvas2dRestored.pixiDisplay !== 'none') {
+    throw new Error(`Canvas2D was not restored after switching renderer: ${JSON.stringify(canvas2dRestored)}`);
+  }
+  // Force the real context while its canvas is hidden. Headless Chromium can
+  // omit its native DOM notifications in this state, so synthesize only events
+  // it did not deliver. The active-Pixi case above also covers native recovery.
+  await page.evaluate(() => window.RendererExperiment.forceContextLoss());
+  await page.waitForFunction(() => document.querySelector('.pixi-renderer-canvas')
+    ?.getContext('webgl2')?.isContextLost(), { timeout: 5000 });
+  const inactiveLost = await page.evaluate(() => {
+    const pixiCanvas = document.querySelector('.pixi-renderer-canvas');
+    const nativeEventHandled = window.RendererExperiment.diagnostics().contextLost;
+    if (!nativeEventHandled) pixiCanvas.dispatchEvent(new Event('webglcontextlost', { cancelable: true }));
+    return { ...window.RendererExperiment.diagnostics(),
+      nativeEventHandled,
+      canvas2dVisibility: getComputedStyle(document.querySelector('#gameCanvas')).visibility,
+      pixiDisplay: getComputedStyle(pixiCanvas).display };
+  });
+  if (inactiveLost.renderer !== 'Canvas2D' || inactiveLost.contextLost !== true ||
+      inactiveLost.canvas2dVisibility !== 'visible' || inactiveLost.pixiDisplay !== 'none') {
+    throw new Error(`Inactive Pixi context loss disturbed Canvas2D: ${JSON.stringify(inactiveLost)}`);
+  }
+  await page.evaluate(() => window.RendererExperiment.forceContextRestore());
+  await page.waitForFunction(() => !document.querySelector('.pixi-renderer-canvas')
+    ?.getContext('webgl2')?.isContextLost(), { timeout: 10000 });
+  await page.waitForTimeout(100);
+  const inactiveRestored = await page.evaluate(() => {
+    const pixiCanvas = document.querySelector('.pixi-renderer-canvas');
+    const nativeEventHandled = !window.RendererExperiment.diagnostics().contextLost;
+    if (!nativeEventHandled) pixiCanvas.dispatchEvent(new Event('webglcontextrestored'));
+    return { ...window.RendererExperiment.diagnostics(),
+      nativeEventHandled,
+      canvas2dVisibility: getComputedStyle(document.querySelector('#gameCanvas')).visibility,
+      pixiDisplay: getComputedStyle(pixiCanvas).display };
+  });
+  if (inactiveRestored.renderer !== 'Canvas2D' || inactiveRestored.contextLost !== false ||
+      inactiveRestored.canvas2dVisibility !== 'visible' || inactiveRestored.pixiDisplay !== 'none') {
+    throw new Error(`Inactive Pixi context restore changed the selected renderer: ${JSON.stringify(inactiveRestored)}`);
+  }
+  const canvasInputAfterRestore = await page.evaluate(() => {
+    gameState = 'PLAYING'; player.waypoint = null;
+    document.querySelector('#gameCanvas').dispatchEvent(new MouseEvent('mousedown',
+      { bubbles: true, clientX: 450, clientY: 320, button: 2 }));
+    gameState = 'PAUSED';
+    return { waypoint: player.waypoint, expectedX: (450 - innerWidth / 2) / zoom + player.x,
+      expectedY: (320 - innerHeight / 2) / zoom + player.y };
+  });
+  if (!canvasInputAfterRestore.waypoint ||
+      Math.abs(canvasInputAfterRestore.waypoint.x - canvasInputAfterRestore.expectedX) > 1e-8 ||
+      Math.abs(canvasInputAfterRestore.waypoint.y - canvasInputAfterRestore.expectedY) > 1e-8) {
+    throw new Error(`Canvas2D input target changed after inactive Pixi recovery: ${JSON.stringify(canvasInputAfterRestore)}`);
+  }
+  await page.evaluate(() => window.RendererExperiment.switchTo('PixiJS/WebGL'));
+  await page.evaluate(() => window.RendererExperiment.dispose());
+  if (await page.locator('.pixi-renderer-canvas').count()) throw new Error('Pixi canvas remained after renderer disposal.');
+  if (errors.length) throw new Error(`Pixi renderer browser errors: ${errors.join('; ')}`);
+  console.log(`PIXI RENDERER LIFECYCLE: ${JSON.stringify({ before, pixi, resized, input, restored, inputAfterRestore, raceLost, explicitCanvasRestored, explicitCanvasInput, canvas2dRestored, inactiveLost, inactiveRestored, canvasInputAfterRestore, switched: true, disposed: true })}`);
+  await page.close();
+
+  const missing = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  await missing.route('**/assets/generated/pixi-renderer.js', route => route.abort());
+  await missing.goto(`${baseUrl}/?renderer-lab`, { waitUntil: 'networkidle' });
+  await missing.getByText('Click to Engage', { exact: true }).click();
+  await missing.getByRole('button', { name: 'Skirmish', exact: true }).click();
+  await missing.getByRole('button', { name: /US NAVY/ }).click();
+  await missing.getByText('BATTLESHIP', { exact: true }).waitFor();
+  const fallback = await missing.evaluate(async () => {
+    try { await window.RendererExperiment.switchTo('PixiJS/WebGL'); } catch (error) { return { error: error.message,
+      renderer: window.RendererExperiment.diagnostics().renderer, canvas: getComputedStyle(document.querySelector('#gameCanvas')).visibility }; }
+    return null;
+  });
+  if (!fallback?.error.includes('bundle is missing') || fallback.renderer !== 'Canvas2D' || fallback.canvas !== 'visible') {
+    throw new Error(`Missing Pixi bundle did not safely retain Canvas2D: ${JSON.stringify(fallback)}`);
+  }
+  await missing.close();
+}
+
 async function verifyEnemyOrbit(browser) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
   page.on("pageerror", (error) => { throw error; });
@@ -859,6 +1069,7 @@ try {
     await verifyDefeat(browser);
     await verifyIslandCollision(browser);
     await verifyIslandDetail(browser);
+    await verifyRendererExperiment(browser);
     await verifyPaintedArt(browser);
     await verifyShellTracers(browser);
     await verifyRenderCaches(browser);

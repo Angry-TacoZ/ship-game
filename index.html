@@ -404,6 +404,9 @@ let animationLoopActive = false, animationLoopStarts = 0;
 let visibleMenuId = null, codexReturnFocus = null;
 const GAME_TITLE = 'Ship Happens';
 const TIME_STEP = 1000 / 60;
+let activeRenderer = 'Canvas2D', pixiRenderer = null, pixiRendererLoad = null, recoverPixiAfterContextLoss = false, contextLossFallbacks = 0;
+const rendererLabEnabled = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname) &&
+    new URLSearchParams(location.search).has('renderer-lab');
 
 let showFPS = false, frameCount = 0, fpsLastTime = 0, currentFPS = 0, isMobileUI = false, autoThrust = false;
 
@@ -1301,6 +1304,17 @@ function gameLoop(timestamp) {
 function renderGameFrame(timestamp) {
         const profile = window.RenderProfile;
         profile?.beginFrame();
+        if (activeRenderer === 'PixiJS/WebGL' && pixiRenderer?.ready) {
+            const state = Object.freeze({ islands, enemies, player, particles, drops, projectiles, damagePopups });
+            const camera = Object.freeze({ x: player.x, y: player.y, zoom });
+            const viewport = Object.freeze({ width, height });
+            pixiRenderer.render(state, camera, viewport, timestamp, profile);
+            return;
+        }
+        drawCanvasFrame(timestamp, profile);
+}
+
+function drawCanvasFrame(timestamp, profile) {
         const view={left:player.x-width/(2*zoom),right:player.x+width/(2*zoom),top:player.y-height/(2*zoom),bottom:player.y+height/(2*zoom),zoom};
         ctx.save(); ctx.translate(width/2, height/2); ctx.scale(zoom, zoom); ctx.translate(-player.x, -player.y);
         profile?.begin('ocean');
@@ -1333,6 +1347,99 @@ function renderGameFrame(timestamp) {
         profile?.end('popups'); profile?.begin('minimapUI');
         drawMinimap(); updateDOM();
         profile?.end('minimapUI'); profile?.endFrame();
+}
+
+async function loadPixiRenderer() {
+    if (pixiRendererLoad) return pixiRendererLoad;
+    pixiRendererLoad = new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = 'assets/generated/pixi-renderer.js';
+        script.onload = () => resolve(window.PixiGameRenderer);
+        script.onerror = () => reject(new Error('Local Pixi renderer bundle is missing. Run npm run build.'));
+        document.head.appendChild(script);
+    });
+    return pixiRendererLoad;
+}
+
+let rendererInputTarget = null;
+function setRendererInputTarget(target) {
+    rendererInputTarget?.removeEventListener('mousedown', canvasMouseInput);
+    rendererInputTarget?.removeEventListener('touchstart', canvasTouchInput);
+    rendererInputTarget = target;
+    rendererInputTarget?.addEventListener('mousedown', canvasMouseInput);
+    rendererInputTarget?.addEventListener('touchstart', canvasTouchInput, { passive: true });
+}
+const canvasMouseInput = e => handleInput(e.clientX, e.clientY, e.button === 2);
+const canvasTouchInput = e => handleInput(e.touches[0].clientX, e.touches[0].clientY, false);
+
+async function switchRenderer(name) {
+    if (!rendererLabEnabled && name !== 'Canvas2D') throw new Error('Renderer experiment is local-only.');
+    if (name === 'Canvas2D') {
+        recoverPixiAfterContextLoss = false;
+        activeRenderer = name; canvas.style.visibility = 'visible';
+        pixiRenderer?.setVisible(false); setRendererInputTarget(canvas); return;
+    }
+    if (name !== 'PixiJS/WebGL') throw new Error(`Unknown renderer: ${name}`);
+    const Renderer = await loadPixiRenderer();
+    if (!pixiRenderer?.ready) {
+        pixiRenderer = await new Renderer().init({ width, height });
+        pixiRenderer.appCanvas.addEventListener('renderer-context-lost', () => {
+            recoverPixiAfterContextLoss = activeRenderer === 'PixiJS/WebGL';
+            if (recoverPixiAfterContextLoss) { contextLossFallbacks++; activeRenderer = 'Canvas2D'; canvas.style.visibility = 'visible'; setRendererInputTarget(canvas); }
+        });
+        pixiRenderer.appCanvas.addEventListener('renderer-context-restored', () => {
+            if (rendererLabEnabled && recoverPixiAfterContextLoss) {
+                recoverPixiAfterContextLoss = false;
+                pixiRenderer.setVisible(true);
+                activeRenderer = 'PixiJS/WebGL'; canvas.style.visibility = 'hidden'; setRendererInputTarget(pixiRenderer.appCanvas);
+            }
+        });
+    }
+    pixiRenderer.setVisible(true); canvas.style.visibility = 'hidden';
+    activeRenderer = name; setRendererInputTarget(pixiRenderer.appCanvas);
+}
+
+async function restartPixiRenderer() {
+    const resumePixi = activeRenderer === 'PixiJS/WebGL';
+    if (pixiRenderer) pixiRenderer.dispose();
+    pixiRenderer = null; activeRenderer = 'Canvas2D'; canvas.style.visibility = 'visible'; setRendererInputTarget(canvas);
+    if (resumePixi) await switchRenderer('PixiJS/WebGL');
+    return activeRenderer;
+}
+
+if (rendererLabEnabled) {
+    const panel = document.createElement('aside');
+    Object.assign(panel.style, { position: 'fixed', zIndex: '100', left: '12px', bottom: '12px', padding: '10px',
+        color: '#dbeafe', background: 'rgba(8,18,34,.92)', border: '1px solid #47627d', borderRadius: '8px',
+        font: '12px monospace', display: 'grid', gap: '6px' });
+    panel.innerHTML = '<div id="renderer-lab-stats">Renderer lab loading…</div><div style="display:flex;gap:4px"><button data-render="Canvas2D">Canvas2D</button><button data-render="PixiJS/WebGL">PixiJS/WebGL</button><button data-restart>Restart</button><button data-context>Lose context</button></div>';
+    document.body.appendChild(panel);
+    panel.querySelectorAll('[data-render]').forEach(button => button.addEventListener('click', () => switchRenderer(button.dataset.render).catch(error => {
+        document.getElementById('renderer-lab-stats').textContent = error.message;
+    })));
+    panel.querySelector('[data-restart]').addEventListener('click', () => restartPixiRenderer().catch(error => {
+        document.getElementById('renderer-lab-stats').textContent = error.message;
+    }));
+    panel.querySelector('[data-context]').addEventListener('click', () => pixiRenderer?.forceContextLoss());
+    window.RendererExperiment = {
+        ready: Promise.resolve(NavalArt.ready).then(ok => ok && new URLSearchParams(location.search).has('renderer=pixi') ? switchRenderer('PixiJS/WebGL') : undefined),
+        switchTo: switchRenderer,
+        restart: restartPixiRenderer,
+        forceContextLoss: () => pixiRenderer?.forceContextLoss(),
+        forceContextRestore: () => pixiRenderer?.forceContextRestore(),
+        dispose: () => { activeRenderer = 'Canvas2D'; canvas.style.visibility = 'visible'; setRendererInputTarget(canvas); pixiRenderer?.dispose(); pixiRenderer = null; },
+        diagnostics: () => ({ ...pixiRenderer?.renderInfo(), renderer: activeRenderer, contextLossFallbacks })
+    };
+    const stats = document.getElementById('renderer-lab-stats');
+    let previous = performance.now(), lastPaint = previous, recent = [];
+    const updateStats = () => { const now = performance.now(); recent.push(now - previous); previous = now; if (recent.length > 120) recent.shift();
+        if (now - lastPaint >= 250) {
+        const ordered = [...recent].sort((a,b)=>a-b), pct = q => ordered[Math.min(ordered.length-1, Math.floor(ordered.length*q))] || 0;
+        stats.textContent = `${activeRenderer} · ${Math.round(1000/(recent.reduce((a,b)=>a+b,0)/Math.max(1,recent.length)))} FPS · frame p50/p95/p99 ${pct(.5).toFixed(1)}/${pct(.95).toFixed(1)}/${pct(.99).toFixed(1)} ms · ${pixiRenderer?.renderInfo().wakeSprites || 0} wake sprites`;
+        lastPaint = now;
+        }
+        requestAnimationFrame(updateStats); };
+    requestAnimationFrame(updateStats);
 }
 
 function updateDOM() {
@@ -1764,7 +1871,7 @@ function startGame() {
     }
 }
 
-function resize() { width = window.innerWidth; height = window.innerHeight; canvas.width = width; canvas.height = height; mCanvas.width = 280; mCanvas.height = 280; }
+function resize() { width = window.innerWidth; height = window.innerHeight; canvas.width = width; canvas.height = height; mCanvas.width = 280; mCanvas.height = 280; pixiRenderer?.resize(width, height); }
 window.addEventListener('resize', resize); resize();
 window.addEventListener('keydown', e => {
     keys[e.code] = true;
@@ -1808,8 +1915,7 @@ const handleInput = (clientX, clientY, isRightClick = false) => {
     }
 };
 
-canvas.addEventListener('mousedown', e => { handleInput(e.clientX, e.clientY, e.button === 2); });
-canvas.addEventListener('touchstart', e => { handleInput(e.touches[0].clientX, e.touches[0].clientY, false); }, { passive: true });
+setRendererInputTarget(canvas);
 window.addEventListener('wheel', e => { zoom = Math.max(0.1, Math.min(2.0, zoom - e.deltaY * 0.001)); }, { passive: false });
 // Local-only, opt-in diagnostic. No script, UI or timing buffers in normal play.
 if (['localhost', '127.0.0.1', '[::1]'].includes(location.hostname) && new URLSearchParams(location.search).has('profile-render')) {

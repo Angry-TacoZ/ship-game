@@ -14,6 +14,24 @@ python -m http.server 8765 --bind 127.0.0.1
 
 Open http://127.0.0.1:8765 in a browser. Choose **Click to Engage**, **Skirmish**, then a navy.
 
+### Local renderer experiment
+
+The production/default renderer remains Canvas2D. To try the separate PixiJS/WebGL
+experiment, install dependencies and build its local (not CDN-loaded) bundle:
+
+```powershell
+npm.cmd install
+npm.cmd run build
+```
+
+Then open `http://127.0.0.1:8765/?renderer-lab`. The lower-left panel switches
+between Canvas2D and PixiJS/WebGL, reports rolling frame intervals, restarts the
+Pixi renderer, and can force a WebGL context loss to check Canvas fallback and
+recovery. `?renderer-lab&renderer=pixi` starts directly in Pixi. This diagnostic
+is restricted to loopback hosts and does not alter ordinary game sessions. See
+[`docs/pixi-renderer-experiment.md`](docs/pixi-renderer-experiment.md) for the
+controlled comparison and its limits.
+
 - W/S or Up/Down: forward/reverse thrust.
 - A/D or Left/Right: turn.
 - Right-click the ocean: autopilot waypoint.

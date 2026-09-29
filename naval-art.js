@@ -3,6 +3,7 @@
 window.NavalArt = (() => {
     const images = {};
     const hulls = new Map();
+    const turretTextures = new Map();
     const wakes = new WeakMap();
     let waterTile, shipCrop, foam;
     const islandNames = ['island', 'island-lowland', 'island-spine'];
@@ -187,9 +188,7 @@ window.NavalArt = (() => {
             width: projectile.size > 8 ? 13 : 8 };
     }
 
-    function shell(context, projectile) {
-        if (projectile.life <= 0) return;
-        const key = projectile.friendly ? (projectile.size > 8 ? 'main' : 'secondary') : 'enemy';
+    function getShellSprites(key) {
         if (!shellSprites.has(key)) {
             const hot = key === 'enemy' ? '245, 111, 65' : '237, 192, 115';
             const trail = canvas(256, 32), tc = trail.getContext('2d');
@@ -215,7 +214,13 @@ window.NavalArt = (() => {
             hc.fillStyle = '#fff1cf'; hc.fillRect(15, 13, 12, 2);
             shellSprites.set(key, { trail, head });
         }
-        const sprite = shellSprites.get(key), geometry = shellTrailGeometry(projectile);
+        return shellSprites.get(key);
+    }
+
+    function shell(context, projectile) {
+        if (projectile.life <= 0) return;
+        const key = projectile.friendly ? (projectile.size > 8 ? 'main' : 'secondary') : 'enemy';
+        const sprite = getShellSprites(key), geometry = shellTrailGeometry(projectile);
         context.save(); context.translate(projectile.x, projectile.y); context.rotate(geometry.angle);
         if (geometry.length > 0) context.drawImage(sprite.trail, -geometry.length, -geometry.width / 2, geometry.length, geometry.width);
         const headScale = projectile.size > 8 ? .85 : .55;
@@ -223,8 +228,7 @@ window.NavalArt = (() => {
         context.restore();
     }
 
-    function hull(context, nation, length, width, color, trace) {
-        if (window.RenderProfile && !window.RenderProfile.enabled('hulls')) return;
+    function getHullTexture(nation, length, width, color, trace) {
         const key = `${nation}:${length}:${width}:${color}`;
         if (!hulls.has(key)) {
             const sprite = canvas(Math.ceil(length * 2.4 * 3 + 24), Math.ceil(width * 2 * 3 + 24));
@@ -243,7 +247,14 @@ window.NavalArt = (() => {
             hulls.set(key, { sprite, cx: cx / 3, cy: cy / 3 }); stats.hullCaches = hulls.size;
         }
         const cached = hulls.get(key);
-        context.drawImage(cached.sprite, -cached.cx, -cached.cy, cached.sprite.width / 3, cached.sprite.height / 3);
+        return { texture: cached.sprite, x: cached.cx, y: cached.cy,
+            width: cached.sprite.width / 3, height: cached.sprite.height / 3 };
+    }
+
+    function hull(context, nation, length, width, color, trace) {
+        if (window.RenderProfile && !window.RenderProfile.enabled('hulls')) return;
+        const cached = getHullTexture(nation, length, width, color, trace);
+        context.drawImage(cached.texture, -cached.x, -cached.y, cached.width, cached.height);
     }
 
     function turret(context, size, barrels, barrelLength) {
@@ -260,6 +271,21 @@ window.NavalArt = (() => {
             context.fillStyle = '#30434e'; context.fillRect(size / 2 - 2, y - 2, barrelLength, 4);
             context.fillStyle = '#a2acaa'; context.fillRect(size / 2 - 2, y - 1.5, barrelLength - 2, 1);
         }
+    }
+
+    function getTurretTexture(size, barrels, barrelLength) {
+        const key = `${size}:${barrels}:${barrelLength}`;
+        if (!turretTextures.has(key)) {
+            const padding = 4;
+            const width = Math.ceil(padding * 2 + size + barrelLength);
+            const height = Math.ceil(padding * 2 + Math.max(size, barrels * 5));
+            const sprite = canvas(width, height), context = sprite.getContext('2d');
+            const x = padding + size / 2, y = height / 2;
+            context.translate(x, y);
+            turret(context, size, barrels, barrelLength);
+            turretTextures.set(key, { texture: sprite, x, y, width, height });
+        }
+        return turretTextures.get(key);
     }
 
     function recordWake(entity, dt) {
@@ -316,6 +342,10 @@ window.NavalArt = (() => {
 
     return { ready, stats, variantCount: islandNames.length, ocean, island, shorelineRadius, shell, shellTrailGeometry,
         renderCacheInfo: () => ({wakeSprites:1,wakeBytes:foam.width*foam.height*4,
-            waterBytes:[...waterLevels.values()].reduce((n,c)=>n+c.width*c.height*4,0),hullBytes:[...hulls.values()].reduce((n,h)=>n+h.sprite.width*h.sprite.height*4,0)}),
+            waterBytes:[...waterLevels.values()].reduce((n,c)=>n+c.width*c.height*4,0),hullBytes:[...hulls.values()].reduce((n,h)=>n+h.sprite.width*h.sprite.height*4,0),
+            shellBytes:[...shellSprites.values()].reduce((n,s)=>n+(s.trail.width*s.trail.height+s.head.width*s.head.height)*4,0),
+            turretBytes:[...turretTextures.values()].reduce((n,s)=>n+s.texture.width*s.texture.height*4,0)}),
+        waterTexture: size => waterLevels.get(size), foamTexture: () => foam,
+        wakePoints: entity => wakes.get(entity) || [], getHullTexture, getTurretTexture, getShellSprites,
         shellCacheCount: () => shellSprites.size, hull, turret, recordWake, wake, wakeCount: entity => (wakes.get(entity) || []).length };
 })();
