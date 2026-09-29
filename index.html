@@ -1389,6 +1389,7 @@ async function switchRenderer(name) {
         pixiRenderer.appCanvas.addEventListener('renderer-context-restored', () => {
             if (rendererLabEnabled && recoverPixiAfterContextLoss) {
                 recoverPixiAfterContextLoss = false;
+                pixiRenderer.setVisible(true);
                 activeRenderer = 'PixiJS/WebGL'; canvas.style.visibility = 'hidden'; setRendererInputTarget(pixiRenderer.appCanvas);
             }
         });

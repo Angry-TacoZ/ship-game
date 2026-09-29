@@ -787,11 +787,49 @@ async function verifyRendererExperiment(browser) {
       canvas2dRestored.pixiDisplay !== 'none') {
     throw new Error(`Canvas2D was not restored after switching renderer: ${JSON.stringify(canvas2dRestored)}`);
   }
+  // A display:none WebGL canvas in headless Chromium does not reliably emit
+  // forced native context events, so exercise the same DOM lifecycle handlers
+  // directly here. The active-Pixi case above covers real forced loss/restore.
+  const inactiveLost = await page.evaluate(() => {
+    const pixiCanvas = document.querySelector('.pixi-renderer-canvas');
+    pixiCanvas.dispatchEvent(new Event('webglcontextlost', { cancelable: true }));
+    return { ...window.RendererExperiment.diagnostics(),
+      canvas2dVisibility: getComputedStyle(document.querySelector('#gameCanvas')).visibility,
+      pixiDisplay: getComputedStyle(pixiCanvas).display };
+  });
+  if (inactiveLost.renderer !== 'Canvas2D' || inactiveLost.contextLost !== true ||
+      inactiveLost.canvas2dVisibility !== 'visible' || inactiveLost.pixiDisplay !== 'none') {
+    throw new Error(`Inactive Pixi context loss disturbed Canvas2D: ${JSON.stringify(inactiveLost)}`);
+  }
+  const inactiveRestored = await page.evaluate(() => {
+    const pixiCanvas = document.querySelector('.pixi-renderer-canvas');
+    pixiCanvas.dispatchEvent(new Event('webglcontextrestored'));
+    return { ...window.RendererExperiment.diagnostics(),
+      canvas2dVisibility: getComputedStyle(document.querySelector('#gameCanvas')).visibility,
+      pixiDisplay: getComputedStyle(pixiCanvas).display };
+  });
+  if (inactiveRestored.renderer !== 'Canvas2D' || inactiveRestored.contextLost !== false ||
+      inactiveRestored.canvas2dVisibility !== 'visible' || inactiveRestored.pixiDisplay !== 'none') {
+    throw new Error(`Inactive Pixi context restore changed the selected renderer: ${JSON.stringify(inactiveRestored)}`);
+  }
+  const canvasInputAfterRestore = await page.evaluate(() => {
+    gameState = 'PLAYING'; player.waypoint = null;
+    document.querySelector('#gameCanvas').dispatchEvent(new MouseEvent('mousedown',
+      { bubbles: true, clientX: 450, clientY: 320, button: 2 }));
+    gameState = 'PAUSED';
+    return { waypoint: player.waypoint, expectedX: (450 - innerWidth / 2) / zoom + player.x,
+      expectedY: (320 - innerHeight / 2) / zoom + player.y };
+  });
+  if (!canvasInputAfterRestore.waypoint ||
+      Math.abs(canvasInputAfterRestore.waypoint.x - canvasInputAfterRestore.expectedX) > 1e-8 ||
+      Math.abs(canvasInputAfterRestore.waypoint.y - canvasInputAfterRestore.expectedY) > 1e-8) {
+    throw new Error(`Canvas2D input target changed after inactive Pixi recovery: ${JSON.stringify(canvasInputAfterRestore)}`);
+  }
   await page.evaluate(() => window.RendererExperiment.switchTo('PixiJS/WebGL'));
   await page.evaluate(() => window.RendererExperiment.dispose());
   if (await page.locator('.pixi-renderer-canvas').count()) throw new Error('Pixi canvas remained after renderer disposal.');
   if (errors.length) throw new Error(`Pixi renderer browser errors: ${errors.join('; ')}`);
-  console.log(`PIXI RENDERER LIFECYCLE: ${JSON.stringify({ before, pixi, resized, input, restored, inputAfterRestore, canvas2dRestored, switched: true, disposed: true })}`);
+  console.log(`PIXI RENDERER LIFECYCLE: ${JSON.stringify({ before, pixi, resized, input, restored, inputAfterRestore, canvas2dRestored, inactiveLost, inactiveRestored, canvasInputAfterRestore, switched: true, disposed: true })}`);
   await page.close();
 
   const missing = await browser.newPage({ viewport: { width: 1280, height: 720 } });
