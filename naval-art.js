@@ -7,6 +7,7 @@ window.NavalArt = (() => {
     let waterTile, shipCrop, foam;
     const islandNames = ['island', 'island-lowland', 'island-spine'];
     const islandSources = [];
+    const shellSprites = new Map();
     const segments = 128;
     const stats = { ready: false, failed: false, hullCaches: 0, islandPaints: 0, wakePoints: 0 };
 
@@ -149,6 +150,52 @@ window.NavalArt = (() => {
         context.restore();
     }
 
+    // Straight-moving shells need no history arrays or additional particles.
+    function shellTrailGeometry(projectile) {
+        const speed = Math.hypot(projectile.vx, projectile.vy);
+        const distance = Math.hypot(projectile.x - projectile.originX, projectile.y - projectile.originY);
+        const maximumLength = projectile.size > 8 ? 170 : 105;
+        return { angle: Math.atan2(projectile.vy, projectile.vx),
+            length: Math.min(distance, maximumLength, speed * 12),
+            width: projectile.size > 8 ? 13 : 8 };
+    }
+
+    function shell(context, projectile) {
+        if (projectile.life <= 0) return;
+        const key = projectile.friendly ? (projectile.size > 8 ? 'main' : 'secondary') : 'enemy';
+        if (!shellSprites.has(key)) {
+            const hot = key === 'enemy' ? '245, 111, 65' : '237, 192, 115';
+            const trail = canvas(256, 32), tc = trail.getContext('2d');
+            const glow = tc.createLinearGradient(0, 0, 256, 0);
+            glow.addColorStop(0, `rgba(${hot}, 0)`);
+            glow.addColorStop(.45, `rgba(${hot}, .12)`);
+            glow.addColorStop(1, `rgba(${hot}, .65)`);
+            tc.fillStyle = glow;
+            tc.beginPath(); tc.moveTo(0, 16); tc.lineTo(256, 2); tc.lineTo(256, 30); tc.closePath(); tc.fill();
+            const core = tc.createLinearGradient(0, 0, 256, 0);
+            core.addColorStop(0, 'rgba(255, 242, 213, 0)');
+            core.addColorStop(.65, `rgba(${hot}, .35)`);
+            core.addColorStop(1, 'rgba(255, 245, 222, .95)');
+            tc.fillStyle = core;
+            tc.beginPath(); tc.moveTo(0, 16); tc.lineTo(256, 12); tc.lineTo(256, 20); tc.closePath(); tc.fill();
+            const head = canvas(48, 32), hc = head.getContext('2d');
+            const halo = hc.createRadialGradient(24, 16, 1, 24, 16, 14);
+            halo.addColorStop(0, `rgba(${hot}, .65)`); halo.addColorStop(1, `rgba(${hot}, 0)`);
+            hc.fillStyle = halo; hc.fillRect(0, 0, 48, 32);
+            hc.fillStyle = key === 'enemy' ? '#b56342' : '#a48c61';
+            hc.beginPath(); hc.moveTo(12, 12); hc.lineTo(26, 12); hc.lineTo(34, 16);
+            hc.lineTo(26, 20); hc.lineTo(12, 20); hc.closePath(); hc.fill();
+            hc.fillStyle = '#fff1cf'; hc.fillRect(15, 13, 12, 2);
+            shellSprites.set(key, { trail, head });
+        }
+        const sprite = shellSprites.get(key), geometry = shellTrailGeometry(projectile);
+        context.save(); context.translate(projectile.x, projectile.y); context.rotate(geometry.angle);
+        if (geometry.length > 0) context.drawImage(sprite.trail, -geometry.length, -geometry.width / 2, geometry.length, geometry.width);
+        const headScale = projectile.size > 8 ? .85 : .55;
+        context.drawImage(sprite.head, -24 * headScale, -16 * headScale, 48 * headScale, 32 * headScale);
+        context.restore();
+    }
+
     function hull(context, nation, length, width, color, trace) {
         const key = `${nation}:${length}:${width}:${color}`;
         if (!hulls.has(key)) {
@@ -229,5 +276,6 @@ window.NavalArt = (() => {
         context.restore();
     }
 
-    return { ready, stats, variantCount: islandNames.length, ocean, island, shorelineRadius, hull, turret, recordWake, wake, wakeCount: entity => (wakes.get(entity) || []).length };
+    return { ready, stats, variantCount: islandNames.length, ocean, island, shorelineRadius, shell, shellTrailGeometry,
+        shellCacheCount: () => shellSprites.size, hull, turret, recordWake, wake, wakeCount: entity => (wakes.get(entity) || []).length };
 })();

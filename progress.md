@@ -107,3 +107,10 @@ Original prompt: Recover the playable browser naval game and continue its develo
 - Added bounded rejection placement with conservative visual extents, a 450px minimum water gap and 700px origin clearance. The 15 islands retain their existing radius range; five of each family appear per layout. A bounded outward fallback handles pathological randomness without overlaps or fewer islands.
 - Verifier covers 100 seeded layouts and a constant random source, all three distinct shoreline signatures, coast opacity/offshore transparency, bounds and centers for each family. Offshore pixel samples now measure distance from the entire polygon rather than assuming a radial offset clears adjacent headlands.
 - Added ignored runtime render artifacts island-families.png and island-layout.png for actual cached terrain review. Existing ship collision-clearance, AI, weapons, progression, and controls are outside this change. Three source families still repeat; lower-end mobile hardware and baked lighting remain review limitations.
+
+## Shells and streaming tracers
+
+- Replaced colored circles with cached shaded shell bodies and tapered luminous trails; player fire uses warm gold and enemy fire ember-red. Secondary tracers are slimmer/shorter. Launch coordinates limit the trail so it never reaches behind the muzzle; dead/expired shells are invisible.
+- Projectile update, damage, collision checks, nation speed multipliers, firing intervals/spread and lifetime remain unchanged. Rendering requires no extra particles or trail history, at most two sprite draws per shot and three shared cache entries.
+- Added twelve angle/style cases, launch-length, trail bounds/alignment, pixel visibility ahead/behind, movement/lifetime preservation, player/enemy damage and expiry checks, plus exact-scene before/after screenshots.
+- Local 1440x900 Chromium comparison with 200 simultaneous projectiles: old median/p95 16.7/16.7ms, new 16.7/16.8ms. This is not lower-end hardware validation and does not resolve the separately reported water/zoom slowdown; that optimization awaits James's direction.

@@ -518,6 +518,73 @@ async function verifyPaintedArt(browser) {
   }
 }
 
+async function verifyShellTracers(browser) {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.goto(baseUrl);
+  await page.getByRole('button', { name: 'Click to Engage', exact: true }).click();
+  await page.getByRole('button', { name: 'Skirmish', exact: true }).click();
+  await page.getByRole('button', { name: /US NAVY/ }).click();
+  const result = await page.evaluate(() => {
+    gameState = 'PAUSED'; enemies = []; player.x = -10000; player.y = -10000;
+    const surface = document.createElement('canvas'); surface.width = 400; surface.height = 400;
+    const context = surface.getContext('2d');
+    const cases = [];
+    for (const [friendly, size, speed] of [[true,13,11], [true,5,15], [false,8,8]]) {
+      for (const angle of [0, Math.PI/2, Math.PI, -Math.PI/4]) {
+        const p = new Projectile(200,200,angle,friendly,speed,77,'#fff',size);
+        const initialLength = NavalArt.shellTrailGeometry(p).length;
+        for (let step = 0; step < 20; step++) p.update(16.6);
+        const distance = Math.hypot(p.x-200,p.y-200), trail = NavalArt.shellTrailGeometry(p);
+        // Draw around a fixed canvas center without changing traveled distance.
+        context.clearRect(0,0,400,400); context.save(); context.translate(200-p.x,200-p.y); NavalArt.shell(context,p); context.restore();
+        const alpha = offset => context.getImageData(Math.round(200+Math.cos(angle)*offset),Math.round(200+Math.sin(angle)*offset),1,1).data[3];
+        cases.push({ friendly,size,angle, initialLength, bounded: trail.length <= distance && trail.length <= 170,
+          aligned: Math.abs(trail.angle-angle) < 1e-9, visibleBehind: alpha(-trail.length*.4)>0,
+          clearAhead: alpha(40)===0, movementPreserved: Math.abs(distance-speed*20)<1e-6,
+          damagePreserved: p.damage===77 && Math.abs(p.life-(8000-20*16.6))<1e-8 });
+      }
+    }
+    const target = { x: 110, y: 0, radius: 20, health: 100 };
+    enemies = [target]; const friendly = new Projectile(100,0,0,true,11,25,'#fff',13); friendly.update(16.6);
+    const friendlyHit = target.health === 75 && friendly.life === 0;
+    enemies = []; player.x = 110; player.y = 0; player.health = 100;
+    const hostile = new Projectile(100,0,0,false,8,17,'#f00',8); hostile.update(16.6);
+    const hostileHit = player.health === 83 && hostile.life === 0;
+    context.clearRect(0,0,400,400); NavalArt.shell(context,friendly); NavalArt.shell(context,hostile);
+    const deadInvisible = context.getImageData(0,0,400,400).data.every(v => v === 0);
+    player.x = -10000; player.y = -10000;
+    const expired = new Projectile(0,0,0,true,11,25,'#fff',13); expired.update(8001);
+    NavalArt.shell(context,expired);
+    const expiredInvisible = expired.life < 0 && context.getImageData(0,0,400,400).data.every(v => v === 0);
+    player.x = 0; player.y = 200; player.angle = -.5; player.turretAngle = -.5; player.health = player.maxHealth;
+    islands = [islands[0]]; islands[0].x = 600; islands[0].y = -550; islands[0].radius = 500; buildIslandBuffer(islands[0]);
+    projectiles = [];
+    const add = (x,y,angle,isFriendly,speed,size,distance) => {
+      const p = new Projectile(x,y,angle,isFriendly,speed,77,'#ef4444',size);
+      p.x += Math.cos(angle)*distance; p.y += Math.sin(angle)*distance; projectiles.push(p);
+    };
+    for (let i=0;i<3;i++) add(45,180+i*14,-.5+i*.035,true,11,13,390+i*25);
+    for (let i=0;i<2;i++) add(0,220+i*12,-.12,true,15,5,480+i*35);
+    add(900,-100,Math.PI-.4,false,8,8,330); zoom = .7;
+    window.__tracerDraw = Projectile.prototype.draw;
+    return { cases, friendlyHit, hostileHit, deadInvisible, expiredInvisible, cacheCount: NavalArt.shellCacheCount() };
+  });
+  if (result.cases.some(c => c.initialLength !== 0 || !c.bounded || !c.aligned || !c.visibleBehind || !c.clearAhead || !c.movementPreserved || !c.damagePreserved) ||
+      !result.friendlyHit || !result.hostileHit || !result.deadInvisible || !result.expiredInvisible || result.cacheCount !== 3 || errors.length) {
+    throw new Error(`Shell tracer verification failed: ${JSON.stringify({ result, errors })}`);
+  }
+  await page.waitForTimeout(100);
+  await page.screenshot({ path: `${outputDirectory}/shell-tracers.png` });
+  await page.evaluate(() => { Projectile.prototype.draw = function() { ctx.fillStyle=this.color;ctx.beginPath();ctx.arc(this.x,this.y,this.size,0,Math.PI*2);ctx.fill(); }; });
+  await page.waitForTimeout(100);
+  await page.screenshot({ path: `${outputDirectory}/shell-tracers-before.png` });
+  await page.evaluate(() => { Projectile.prototype.draw = window.__tracerDraw; });
+  console.log(`SHELL TRACERS: ${JSON.stringify(result)}`);
+  await page.close();
+}
+
 async function verifyIslandDetail(browser) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
   page.on("pageerror", (error) => { throw error; });
@@ -730,6 +797,7 @@ try {
     await verifyIslandCollision(browser);
     await verifyIslandDetail(browser);
     await verifyPaintedArt(browser);
+    await verifyShellTracers(browser);
     await verifyEnemyOrbit(browser);
     await verifySecondaryArcs(browser);
     await verifyAnimationLoop(browser);

@@ -941,13 +941,13 @@ class Drop {
 }
 
 class Projectile {
-    constructor(x, y, a, f, s, d, c, sz) { this.x = x; this.y = y; this.vx = Math.cos(a)*s; this.vy = Math.sin(a)*s; this.friendly = f; this.damage = d; this.color = c; this.size = sz; this.life = 8000; }
+    constructor(x, y, a, f, s, d, c, sz) { this.x = x; this.y = y; this.originX = x; this.originY = y; this.vx = Math.cos(a)*s; this.vy = Math.sin(a)*s; this.friendly = f; this.damage = d; this.color = c; this.size = sz; this.life = 8000; }
     update(dt) {
         this.x += this.vx*(dt/16.6); this.y += this.vy*(dt/16.6); this.life -= dt;
         if (this.friendly) { enemies.forEach(e => { if (Math.hypot(e.x-this.x, e.y-this.y) < e.radius+10) { e.health -= this.damage; damagePopups.push({ x: e.x, y: e.y, text: Math.round(this.damage), color: '#fff', life: 1000, vy: -1.5 }); this.life = 0; SoundManager.playScrap(); } }); }
         else if (player && Math.hypot(player.x-this.x, player.y-this.y) < player.radius+5) { player.health -= this.damage; damagePopups.push({ x: player.x, y: player.y, text: Math.round(this.damage), color: '#ef4444', life: 1000, vy: -1.5 }); this.life = 0; }
     }
-    draw() { ctx.fillStyle = this.color; ctx.beginPath(); ctx.arc(this.x, this.y, this.size, 0, Math.PI*2); ctx.fill(); }
+    draw() { NavalArt.shell(ctx, this); }
 }
 
 class Player {
