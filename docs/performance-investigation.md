@@ -1,5 +1,9 @@
 # PR #13 Canvas2D performance investigation
 
+The investigation and measurements below are historical evidence from the
+Canvas2D optimization pass. See the final-status addendum for the later
+foreground comparison and James's manual acceptance of the current build.
+
 Scope: local desktop rendering, preserving the approved painted art. No merge,
 deployment, WebGL migration, gameplay changes or new image-generation calls.
 Reviewed baseline: `407a0961ada8ced4b56d95c4c8d32f5b9191b4fb`.
@@ -127,12 +131,12 @@ reduction would be misleading. Shells remain at most two image draws each
 (120 for this 60-shell fixture); hulls remain one cached deck draw per ship
 plus existing borders/guns. These are Canvas API counts, not GPU draw calls.
 
-## Verification and release gate
+## Historical verification and release gate
 
-Final measurements and checks are recorded below. Keep PR #13 draft/unmerged.
-If Wave 5 still misses the 60 FPS gate, use the
-[separate renderer proposal](renderer-migration-proposal.md) for James's
-approval; no migration is implemented by this investigation.
+At this investigation's checkpoint, the measurements below kept PR #13
+draft/unmerged and motivated the [separate renderer proposal](renderer-migration-proposal.md).
+No migration was implemented by this Canvas2D pass. The later Pixi experiment
+and current release assessment are recorded in the final-status addendum.
 
 ## Final controlled measurements
 
@@ -315,3 +319,35 @@ The earlier PR description's light-scene 16.7/16.8ms sample does not cover
 established Wave 5 wake load; this investigation supersedes that performance
 readiness claim. The remaining bottleneck warrants the separate proposal,
 not a claim that the graphics problem is solved.
+
+## Final status: optimized Canvas2D manually accepted (2026-09-29)
+
+James's original gameplay report concerned an early painted-graphics PR #13
+build: severe slowdown, sometimes below roughly 10 FPS, especially while
+zooming or with multiple ships visible. That was a user observation, not an
+instrumented sample; the exact early tested commit was not recorded.
+
+Canvas2D was optimized afterward in
+`171f87bf643e635609e6c35d88e4d97725e94a2f` ("Profile painted renderer and remove
+avoidable Canvas work"): cached water patterns, fewer full-screen fills,
+prefiltered sampling at wide zoom, wake visibility culling, and skipping only
+subpixel-redundant wake centers. PR #14 branched from this already-optimized
+state. Its Pixi comparison did not use the original slow implementation.
+
+PR #14 was merged into PR #13 as
+`49467a30b63ea57694f60b2dacc8b8c1dfc94e7b`. James subsequently played normal
+localhost gameplay without `renderer-lab` and confirmed smooth play under the
+previously problematic kind of use. The served checkout was
+`77b79463c8dc1dddde07fe76359942295f423d60`, whose file tree is identical to that
+merge commit. This is manual/user acceptance, with no invented FPS measurement.
+The final documentation, agent-guidance, and workflow cleanup leaves that
+runtime unchanged, so this acceptance continues to apply.
+
+The completed foreground Chrome comparison on RTX 4090 / ANGLE D3D11 found no
+material Pixi advantage over optimized Canvas2D; see
+[the experiment record](pixi-renderer-experiment.md). Canvas2D remains the
+normal/default renderer. Pixi and profiling remain loopback-only, explicit
+developer options. The original headless and stress measurements remain valid
+for their recorded builds and environments; manual acceptance does not erase
+them or establish sustained 60 FPS across hardware. Lower-end/mobile hardware
+performance remains unverified, separately from the accepted desktop play.
