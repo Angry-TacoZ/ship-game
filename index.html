@@ -1175,14 +1175,44 @@ class Enemy {
  * WORLD SYSTEMS
  * ==========================================
  */
-function initIslands() {
-    islands = [];
-    for(let i=0; i<15; i++) {
-        const radius = 600 + Math.random() * 500;
-        const isl = { x: (Math.random()-0.5)*18000, y: (Math.random()-0.5)*18000, radius: radius, seed1: Math.random() * 10, seed2: Math.random() * 10, trees: [], rocks: [], hills: [] };
-        buildIslandBuffer(isl);
-        islands.push(isl);
+// Conservative visual envelopes leave navigable water, including halo/shadow.
+const ISLAND_WATER_GAP = 450;
+const ISLAND_SPAWN_CLEARANCE = 700;
+function islandPlacementExtent(island) {
+    return island.radius * ISLAND_MAX_SHORELINE_SCALE + ISLAND_MAX_STROKE_PADDING + Math.hypot(ISLAND_SHADOW_OFFSET.x, ISLAND_SHADOW_OFFSET.y);
+}
+function createIslandLayout(random = Math.random) {
+    const layout = [];
+    const variantOrder = Array.from({ length: NavalArt.variantCount }, (_, i) => i);
+    for (let i = variantOrder.length - 1; i > 0; i--) {
+        const j = Math.floor(random() * (i + 1));
+        [variantOrder[i], variantOrder[j]] = [variantOrder[j], variantOrder[i]];
     }
+    for(let i=0; i<15; i++) {
+        const isl = { radius: 600 + random() * 500, seed1: random() * 10, seed2: random() * 10,
+            artVariant: variantOrder[i % variantOrder.length], trees: [], rocks: [], hills: [] };
+        const extent = islandPlacementExtent(isl);
+        let placed = false;
+        for (let attempt = 0; attempt < 256; attempt++) {
+            isl.x = (random() - 0.5) * 18000; isl.y = (random() - 0.5) * 18000;
+            if (Math.hypot(isl.x, isl.y) < extent + ISLAND_SPAWN_CLEARANCE) continue;
+            if (layout.some(other => Math.hypot(isl.x - other.x, isl.y - other.y) < extent + islandPlacementExtent(other) + ISLAND_WATER_GAP)) continue;
+            placed = true; break;
+        }
+        // Bounded fallback for pathological randomness; the sea has no hard edge.
+        if (!placed) {
+            const outerEdge = layout.reduce((edge, other) => Math.max(edge, Math.hypot(other.x, other.y) + islandPlacementExtent(other)), ISLAND_SPAWN_CLEARANCE);
+            const distance = outerEdge + extent + ISLAND_WATER_GAP;
+            const angle = i * 2.399963229728653;
+            isl.x = Math.cos(angle) * distance; isl.y = Math.sin(angle) * distance;
+        }
+        layout.push(isl);
+    }
+    return layout;
+}
+function initIslands() {
+    islands = createIslandLayout();
+    islands.forEach(buildIslandBuffer);
 }
 
 
@@ -1417,8 +1447,8 @@ function startGame() {
         };
     }
     if (new URLSearchParams(window.location.search).has('verify-island-detail')) {
-        window.__verifyIslandDetail = () => {
-            const fixture = { x: 0, y: 0, radius: 500, seed1: 1.5, seed2: 2.2, trees: [], rocks: [], hills: [] };
+        window.__verifyIslandDetail = (artVariant = 0) => {
+            const fixture = { x: 0, y: 0, radius: 500, seed1: 1.5, seed2: 2.2, artVariant, trees: [], rocks: [], hills: [] };
             const originalIslands = islands;
             islands = [fixture];
             buildIslandBuffer(fixture);
@@ -1454,6 +1484,15 @@ function startGame() {
             const worldCenterPreserved = Math.abs(drawPosition.x + geometry.centerX - fixture.x) < 0.001 && Math.abs(drawPosition.y + geometry.centerY - fixture.y) < 0.001;
             const landContext = fixture.buffer.getContext('2d');
             let opaqueCoastSamples = 0, clearOffshoreSamples = 0;
+            const coastPoints = Array.from({ length: 128 }, (_, i) => {
+                const a = i * Math.PI / 64, r = outerIslandShorelineRadius(fixture, a);
+                return { x: Math.cos(a) * r, y: Math.sin(a) * r };
+            });
+            const distanceToCoast = (x, y) => Math.min(...coastPoints.map((p, i) => {
+                const q = coastPoints[(i + 1) % coastPoints.length], dx = q.x - p.x, dy = q.y - p.y;
+                const t = Math.max(0, Math.min(1, ((x - p.x) * dx + (y - p.y) * dy) / (dx * dx + dy * dy)));
+                return Math.hypot(x - p.x - t * dx, y - p.y - t * dy);
+            }));
             for (let i = 0; i < 128; i++) {
                 const angle = i * Math.PI / 64, coast = outerIslandShorelineRadius(fixture, angle);
                 const alphaAt = radius => {
@@ -1463,7 +1502,12 @@ function startGame() {
                     return landContext.getImageData(x, y, 1, 1).data[3];
                 };
                 if (alphaAt(coast - 12) >= 250) opaqueCoastSamples++;
-                if (alphaAt(coast + 84) === 0) clearOffshoreSamples++;
+                // A radial offset can still touch a neighboring headland's halo.
+                // Require 84px clearance from every actual coast segment instead.
+                let offshore = coast + 84;
+                while (offshore < geometry.maximumShorelineRadius + 100 &&
+                    distanceToCoast(Math.cos(angle) * offshore, Math.sin(angle) * offshore) < 84) offshore += 8;
+                if (alphaAt(offshore) === 0) clearOffshoreSamples++;
             }
             player.x = -680; player.y = 0; player.vx = 0; player.vy = 0;
             enemies = enemies.slice(0, 1);

@@ -16,6 +16,8 @@ const server = createServer(async (_request, response) => {
       '/naval-art.js': ['naval-art.js', 'text/javascript; charset=utf-8'],
       '/assets/art/ocean.png': ['assets/art/ocean.png', 'image/png'],
       '/assets/art/island.png': ['assets/art/island.png', 'image/png'],
+      '/assets/art/island-lowland.png': ['assets/art/island-lowland.png', 'image/png'],
+      '/assets/art/island-spine.png': ['assets/art/island-spine.png', 'image/png'],
       '/assets/art/ship-deck.png': ['assets/art/ship-deck.png', 'image/png']
     };
     const file = files[pathname];
@@ -395,6 +397,26 @@ async function verifyPaintedArt(browser) {
   await page.getByRole('button', { name: 'Skirmish', exact: true }).click();
   await page.getByRole('button', { name: /US NAVY/ }).click();
   await page.getByText('BATTLESHIP', { exact: true }).waitFor();
+  const artPreviews = await page.evaluate(() => {
+    const render = (items, width, height, scale, offsetX, offsetY) => {
+      const c = document.createElement('canvas'); c.width = width; c.height = height;
+      const context = c.getContext('2d'); NavalArt.ocean(context, 0, 0, width, height);
+      context.translate(offsetX, offsetY); context.scale(scale, scale);
+      for (const island of items) {
+        const p = islandBufferWorldPosition(island), g = island.renderGeometry;
+        context.drawImage(island.buffer, p.x, p.y, g.bufferWidth, g.bufferHeight);
+      }
+      return c.toDataURL().split(',')[1];
+    };
+    const gallery = Array.from({ length: NavalArt.variantCount }, (_, artVariant) => {
+      const island = { x: artVariant * 1600, y: 0, radius: 560, seed1: 0, seed2: 2.2, artVariant };
+      buildIslandBuffer(island); return island;
+    });
+    return { layout: render(islands, 1200, 1200, 0.053, 600, 600),
+      gallery: render(gallery, 1440, 600, 0.3, 240, 300) };
+  });
+  await writeFile(`${outputDirectory}/island-layout.png`, Buffer.from(artPreviews.layout, 'base64'));
+  await writeFile(`${outputDirectory}/island-families.png`, Buffer.from(artPreviews.gallery, 'base64'));
   const result = await page.evaluate(() => {
     const maxCacheSide = Math.max(...islands.map(i => Math.max(i.buffer.width, i.buffer.height)));
     const cacheBytes = islands.reduce((sum, i) => sum + i.buffer.width * i.buffer.height * 4, 0);
@@ -403,6 +425,26 @@ async function verifyPaintedArt(browser) {
       return Math.abs(p.x + i.bufferCenterX - i.x) < 1e-6 && Math.abs(p.y + i.bufferCenterY - i.y) < 1e-6;
     });
     const islandCount = islands.length;
+    let minimumGap = Infinity, minimumSpawnClearance = Infinity;
+    const layoutFailures = [];
+    for (let seed = 0; seed < 101; seed++) {
+      let state = seed;
+      const random = seed === 100 ? () => 0.5 : () => ((state = (Math.imul(state, 1664525) + 1013904223) >>> 0) / 4294967296);
+      const layout = createIslandLayout(random);
+      const counts = Array.from({ length: NavalArt.variantCount }, (_, variant) => layout.filter(i => i.artVariant === variant).length);
+      if (layout.length !== 15 || counts.some(count => count !== 5)) layoutFailures.push(seed);
+      for (let i = 0; i < layout.length; i++) {
+        minimumSpawnClearance = Math.min(minimumSpawnClearance, Math.hypot(layout[i].x, layout[i].y) - islandPlacementExtent(layout[i]));
+        for (let j = 0; j < i; j++) minimumGap = Math.min(minimumGap,
+          Math.hypot(layout[i].x - layout[j].x, layout[i].y - layout[j].y) - islandPlacementExtent(layout[i]) - islandPlacementExtent(layout[j]));
+      }
+    }
+    const variantChecks = Array.from({ length: NavalArt.variantCount }, (_, variant) => {
+      const detail = window.__verifyIslandDetail(variant);
+      const signature = Array.from({ length: 128 }, (_, i) => outerIslandShorelineRadius(islands[0], i * Math.PI / 64).toFixed(2)).join(',');
+      return { variant, signature, fits: detail.boundsFit && detail.theoreticalBoundsFit && detail.positivePadding && detail.worldCenterPreserved && detail.shorelineMatchesCollision,
+        opaque: detail.opaqueCoastSamples, clear: detail.clearOffshoreSamples };
+    });
     window.__verifyIslandDetail();
     const model = document.createElement('canvas').getContext('2d');
     const mounts = [];
@@ -442,12 +484,16 @@ async function verifyPaintedArt(browser) {
     keys.ArrowUp = false;
     islands[0].x = 80; islands[0].y = player.y; zoom = 0.5;
     return { ready: NavalArt.stats.ready, islandCount, maxCacheSide, cacheBytes, centersPreserved,
-      movingWake, stoppedWake, terrainColors: colors.size, mounts };
+      movingWake, stoppedWake, terrainColors: colors.size, mounts, minimumGap, minimumSpawnClearance, layoutFailures,
+      distinctSilhouettes: new Set(variantChecks.map(v => v.signature)).size,
+      variantChecks: variantChecks.map(({ signature, ...check }) => check) };
   });
   if (!result.ready || result.islandCount !== 15 || result.maxCacheSide > 1536 ||
       result.cacheBytes > 15 * 1536 * 1536 * 4 || !result.centersPreserved ||
       result.movingWake < 1 || result.movingWake > 100 || result.stoppedWake !== 0 ||
-      result.terrainColors < 100 || result.mounts.some(m => !m.fits || !m.shotAligned) || errors.length) {
+      result.terrainColors < 100 || result.mounts.some(m => !m.fits || !m.shotAligned) ||
+      result.minimumGap < 450 - 1e-6 || result.minimumSpawnClearance < 700 - 1e-6 || result.layoutFailures.length ||
+      result.distinctSilhouettes !== 3 || result.variantChecks.some(v => !v.fits || v.opaque !== 128 || v.clear !== 128) || errors.length) {
     throw new Error(`Painted graphics verification failed: ${JSON.stringify({ result, errors })}`);
   }
   await page.waitForTimeout(100);

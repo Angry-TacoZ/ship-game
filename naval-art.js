@@ -4,7 +4,9 @@ window.NavalArt = (() => {
     const images = {};
     const hulls = new Map();
     const wakes = new WeakMap();
-    let waterTile, islandSource, islandRadii, sourceExtent, shipCrop, foam;
+    let waterTile, shipCrop, foam;
+    const islandNames = ['island', 'island-lowland', 'island-spine'];
+    const islandSources = [];
     const segments = 128;
     const stats = { ready: false, failed: false, hullCaches: 0, islandPaints: 0, wakePoints: 0 };
 
@@ -55,22 +57,27 @@ window.NavalArt = (() => {
             shade.addColorStop(0, 'rgba(236, 246, 229, .6)'); shade.addColorStop(1, 'rgba(220, 240, 229, 0)');
             fc.fillStyle = shade; fc.fillRect(x - radius, y - radius, radius * 2, radius * 2);
         }
-        islandSource = canvas(1024, 1024);
-        const land = islandSource.getContext('2d', { willReadFrequently: true });
-        land.drawImage(images.island, 0, 0, 1024, 1024);
-        const pixels = land.getImageData(0, 0, 1024, 1024).data;
-        sourceExtent = 0;
-        for (let y = 0; y < 1024; y++) for (let x = 0; x < 1024; x++) {
-            if (pixels[(y * 1024 + x) * 4 + 3] > 40) sourceExtent = Math.max(sourceExtent, Math.hypot(x - 512, y - 512));
-        }
-        islandRadii = Array.from({ length: segments }, (_, i) => {
-            const a = i * Math.PI * 2 / segments;
-            for (let r = 720; r > 0; r--) {
-                const x = Math.round(512 + Math.cos(a) * r), y = Math.round(512 + Math.sin(a) * r);
-                if (x >= 0 && x < 1024 && y >= 0 && y < 1024 && pixels[(y * 1024 + x) * 4 + 3] > 40) return r;
+        for (const name of islandNames) {
+            const islandSource = canvas(1024, 1024);
+            const land = islandSource.getContext('2d', { willReadFrequently: true });
+            const source = images[name], fit = 1024 / Math.max(source.width, source.height);
+            const width = source.width * fit, height = source.height * fit;
+            land.drawImage(source, (1024 - width) / 2, (1024 - height) / 2, width, height);
+            const pixels = land.getImageData(0, 0, 1024, 1024).data;
+            let sourceExtent = 0;
+            for (let y = 0; y < 1024; y++) for (let x = 0; x < 1024; x++) {
+                if (pixels[(y * 1024 + x) * 4 + 3] > 40) sourceExtent = Math.max(sourceExtent, Math.hypot(x - 512, y - 512));
             }
-            throw new Error('Island artwork must contain land at its center.');
-        });
+            const islandRadii = Array.from({ length: segments }, (_, i) => {
+                const a = i * Math.PI * 2 / segments;
+                for (let r = 720; r > 0; r--) {
+                    const x = Math.round(512 + Math.cos(a) * r), y = Math.round(512 + Math.sin(a) * r);
+                    if (x >= 0 && x < 1024 && y >= 0 && y < 1024 && pixels[(y * 1024 + x) * 4 + 3] > 40) return r;
+                }
+                throw new Error('Island artwork must contain land at its center.');
+            });
+            islandSources.push({ islandSource, islandRadii, sourceExtent });
+        }
         // Trim transparent margins once so deck scale does not depend on padding.
         const ship = canvas(images.ship.width, images.ship.height);
         const sc = ship.getContext('2d', { willReadFrequently: true });
@@ -88,6 +95,8 @@ window.NavalArt = (() => {
     const ready = Promise.all([
         load('water', 'assets/art/ocean.png'),
         load('island', 'assets/art/island.png'),
+        load('island-lowland', 'assets/art/island-lowland.png'),
+        load('island-spine', 'assets/art/island-spine.png'),
         load('ship', 'assets/art/ship-deck.png')
     ]).then(prepare).then(() => true).catch(error => {
         stats.failed = true;
@@ -111,6 +120,7 @@ window.NavalArt = (() => {
     }
 
     function shorelineRadius(island, angle) {
+        const { islandRadii, sourceExtent } = islandSources[island.artVariant ?? 0];
         const rotation = island.seed1 * 0.63;
         const localAngle = ((angle - rotation) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
         const index = localAngle * segments / (Math.PI * 2), low = Math.floor(index);
@@ -119,6 +129,7 @@ window.NavalArt = (() => {
     }
 
     function island(context, island, cx, cy, shoreline) {
+        const { islandSource, sourceExtent } = islandSources[island.artVariant ?? 0];
         stats.islandPaints++;
         context.save();
         context.beginPath();
@@ -218,5 +229,5 @@ window.NavalArt = (() => {
         context.restore();
     }
 
-    return { ready, stats, ocean, island, shorelineRadius, hull, turret, recordWake, wake, wakeCount: entity => (wakes.get(entity) || []).length };
+    return { ready, stats, variantCount: islandNames.length, ocean, island, shorelineRadius, hull, turret, recordWake, wake, wakeCount: entity => (wakes.get(entity) || []).length };
 })();
