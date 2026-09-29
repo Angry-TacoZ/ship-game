@@ -14,6 +14,24 @@ python -m http.server 8765 --bind 127.0.0.1
 
 Open http://127.0.0.1:8765 in a browser. Choose **Click to Engage**, **Skirmish**, then a navy.
 
+### Local renderer experiment
+
+The production/default renderer remains Canvas2D. To try the separate PixiJS/WebGL
+experiment, install dependencies and build its local (not CDN-loaded) bundle:
+
+```powershell
+npm.cmd install
+npm.cmd run build
+```
+
+Then open `http://127.0.0.1:8765/?renderer-lab`. The lower-left panel switches
+between Canvas2D and PixiJS/WebGL, reports rolling frame intervals, restarts the
+Pixi renderer, and can force a WebGL context loss to check Canvas fallback and
+recovery. `?renderer-lab&renderer=pixi` starts directly in Pixi. This diagnostic
+is restricted to loopback hosts and does not alter ordinary game sessions. See
+[`docs/pixi-renderer-experiment.md`](docs/pixi-renderer-experiment.md) for the
+controlled comparison and its limits.
+
 - W/S or Up/Down: forward/reverse thrust.
 - A/D or Left/Right: turn.
 - Right-click the ocean: autopilot waypoint.
@@ -24,7 +42,7 @@ Open http://127.0.0.1:8765 in a browser. Choose **Click to Engage**, **Skirmish*
 
 ## Recovery scope
 
-`index.html` contains the recovered HTML, CSS, game logic, procedural graphics, and procedural Web Audio. No build step or game engine is required. The original Tailwind CDN dependency remains and needs an internet connection for generated UI styling, including classes introduced during play.
+`index.html` contains the HTML, CSS, game logic, and procedural Web Audio. The painted graphics renderer lives in `naval-art.js`, with local images under `assets/art/`. No build step or game engine is required. The original Tailwind CDN dependency remains and needs an internet connection for generated UI styling, including classes introduced during play.
 
 The file was extracted from the running game document. Gemini-injected hosting, authentication, logging, and API bridge scripts were removed. Browser-serialized markup, initial canvas dimensions, and the generated Tailwind style block are retained. This is a recovered standalone snapshot, not the original pre-render HTML file or its editing history.
 

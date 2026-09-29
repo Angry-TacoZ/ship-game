@@ -385,6 +385,7 @@
     </div>
 </div>
 
+<script src="naval-art.js"></script>
 <script>
 /** * ==========================================
  * SETUP & GLOBALS
@@ -403,6 +404,9 @@ let animationLoopActive = false, animationLoopStarts = 0;
 let visibleMenuId = null, codexReturnFocus = null;
 const GAME_TITLE = 'Ship Happens';
 const TIME_STEP = 1000 / 60;
+let activeRenderer = 'Canvas2D', pixiRenderer = null, pixiRendererLoad = null, recoverPixiAfterContextLoss = false, contextLossFallbacks = 0;
+const rendererLabEnabled = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname) &&
+    new URLSearchParams(location.search).has('renderer-lab');
 
 let showFPS = false, frameCount = 0, fpsLastTime = 0, currentFPS = 0, isMobileUI = false, autoThrust = false;
 
@@ -464,9 +468,16 @@ window.onload = () => {
     setTimeout(() => { document.getElementById('main-logo').classList.add('active'); }, 500);
 };
 
-function transitionToMainMenu() {
+async function transitionToMainMenu() {
     if (gameState !== 'SPLASH') return;
     SoundManager.init();
+    const engage = document.getElementById('engage-prompt');
+    engage.disabled = true;
+    const loaded = await NavalArt.ready;
+    if (!loaded) {
+        engage.textContent = 'Artwork unavailable. Reload to retry.';
+        return;
+    }
     gameState = 'MAIN_MENU';
     document.getElementById('engage-prompt').classList.add('hidden');
     document.getElementById('main-logo').classList.add('header-view');
@@ -728,20 +739,15 @@ function updateVolume(type, val) {
 }
 
 const ISLAND_LAYERS = [
-    { r: 1.0, color: '#b77b38', light: '#dba95b', shadow: '#75462c', noise: 0.15 },
-    { r: 0.88, color: '#e7cc86', light: '#f7e5ad', shadow: '#b28a50', noise: 0.11 },
-    { r: 0.75, color: '#4f9d57', light: '#79bd6c', shadow: '#2d6b43', noise: 0.1 },
-    { r: 0.58, color: '#347b49', light: '#55a05a', shadow: '#1e513b', noise: 0.08 },
-    { r: 0.4, color: '#24543d', light: '#3e7b4d', shadow: '#15382d', noise: 0.06 }
+    { r: 1.0 }
 ];
 const ISLAND_SHADOW_OFFSET = { x: 20, y: 28 };
 const ISLAND_RENDER_PADDING = 12;
-const ISLAND_LAYER_STROKE_WIDTHS = [6, 6, 8, 8, 8];
-const ISLAND_MAX_STROKE_PADDING = Math.max(...ISLAND_LAYER_STROKE_WIDTHS) / 2;
+const ISLAND_MAX_SHORELINE_SCALE = 1.3;
+const ISLAND_MAX_STROKE_PADDING = 18; // Includes the new shallow-water halo.
 
-function islandLayerRadius(isl, angle, layer) {
-    const noise = (Math.sin(5 * angle + isl.seed1) + Math.cos(7 * angle + isl.seed2)) * layer.noise;
-    return isl.radius * layer.r * (1 + noise);
+function islandLayerRadius(isl, angle) {
+    return NavalArt.shorelineRadius(isl, angle);
 }
 
 function outerIslandShorelineRadius(isl, angle) {
@@ -769,13 +775,6 @@ function traceIslandLayer(context, isl, radius, centerX, centerY, layer) {
     context.closePath();
 }
 
-function islandLayerGradient(context, centerX, centerY, radius, layer) {
-    const gradient = context.createLinearGradient(centerX - radius, centerY - radius, centerX + radius, centerY + radius);
-    gradient.addColorStop(0, layer.light);
-    gradient.addColorStop(0.52, layer.color);
-    gradient.addColorStop(1, layer.shadow);
-    return gradient;
-}
 
 function includeIslandRenderCircle(bounds, x, y, radius) {
     bounds.minX = Math.min(bounds.minX, x - radius);
@@ -786,9 +785,8 @@ function includeIslandRenderCircle(bounds, x, y, radius) {
 
 function getIslandRenderGeometry(isl) {
     const radius = isl.radius;
-    const outerLayer = ISLAND_LAYERS[0];
-    // The two noise terms can add up to twice the layer's noise amplitude.
-    const maximumShorelineRadius = radius * outerLayer.r * (1 + 2 * outerLayer.noise);
+    // Painted coast is normalized to 1.24x; reserve 1.30x for margin.
+    const maximumShorelineRadius = radius * ISLAND_MAX_SHORELINE_SCALE;
     const renderBounds = {
         minX: -maximumShorelineRadius - ISLAND_MAX_STROKE_PADDING,
         maxX: maximumShorelineRadius + ISLAND_MAX_STROKE_PADDING,
@@ -796,9 +794,6 @@ function getIslandRenderGeometry(isl) {
         maxY: maximumShorelineRadius + ISLAND_MAX_STROKE_PADDING
     };
     includeIslandRenderCircle(renderBounds, ISLAND_SHADOW_OFFSET.x, ISLAND_SHADOW_OFFSET.y, maximumShorelineRadius);
-    isl.trees.forEach(tree => includeIslandRenderCircle(renderBounds, tree.x, tree.y, tree.size * 1.12 + 9));
-    isl.hills.forEach(hill => includeIslandRenderCircle(renderBounds, hill.x, hill.y, Math.hypot(hill.width, hill.height) + 32));
-    isl.rocks.forEach(rock => includeIslandRenderCircle(renderBounds, rock.x, rock.y, rock.size * 1.5 + 26));
 
     const centerX = Math.ceil(ISLAND_RENDER_PADDING - renderBounds.minX);
     const centerY = Math.ceil(ISLAND_RENDER_PADDING - renderBounds.minY);
@@ -824,12 +819,15 @@ function getIslandRenderGeometry(isl) {
 function buildIslandBuffer(isl) {
     const geometry = getIslandRenderGeometry(isl);
     isl.buffer = document.createElement('canvas');
-    isl.buffer.width = geometry.bufferWidth;
-    isl.buffer.height = geometry.bufferHeight;
+    isl.bufferScale = Math.min(1, 1536 / Math.max(geometry.bufferWidth, geometry.bufferHeight));
+    isl.buffer.width = Math.min(1536, Math.ceil(geometry.bufferWidth * isl.bufferScale));
+    isl.buffer.height = Math.min(1536, Math.ceil(geometry.bufferHeight * isl.bufferScale));
     isl.bufferCenterX = geometry.centerX;
     isl.bufferCenterY = geometry.centerY;
     isl.renderGeometry = geometry;
-    renderIslandToBuffer(isl.buffer.getContext('2d'), isl, isl.radius, geometry.centerX, geometry.centerY);
+    const bufferContext = isl.buffer.getContext('2d');
+    bufferContext.scale(isl.bufferScale, isl.bufferScale);
+    renderIslandToBuffer(bufferContext, isl, isl.radius, geometry.centerX, geometry.centerY);
 }
 
 function islandBufferWorldPosition(isl) {
@@ -867,16 +865,19 @@ function resolveIslandCollision(entity) {
  * ==========================================
  */
 function drawDetailedHull(context, nation, radius, hullColor, isPlayer = false) {
-    const { length: len, width: w } = getHullDimensions(radius, nation);
-    context.save();
-    context.fillStyle = hullColor; context.strokeStyle = '#000'; context.lineWidth = isPlayer ? 2.5 : 1.5;
+    const { length: len, width: hullWidth } = getHullDimensions(radius, nation);
+    const w = hullWidth * 0.72;
+    NavalArt.hull(context, nation, len, w, hullColor, context => traceShipHull(context, nation, radius));
+}
+
+function traceShipHull(context, nation, radius) {
+    const { length: len, width } = getHullDimensions(radius, nation);
+    const w = width * 0.72;
     context.beginPath();
     if (nation === 'Japan') { context.moveTo(len, 0); context.bezierCurveTo(len*0.8, w*1.3, len*0.2, w*1.1, -len*0.8, w); context.lineTo(-len, w*0.6); context.lineTo(-len, -w*0.6); context.bezierCurveTo(-len*0.8, -w*1.1, len*0.2, -w*1.3, len, 0); }
     else if (nation === 'Germany') { context.moveTo(len*1.2, 0); context.lineTo(len*0.7, w); context.lineTo(-len*0.9, w); context.lineTo(-len, w*0.8); context.lineTo(-len, -w*0.8); context.lineTo(-len*0.9, -w); context.lineTo(len*0.7, -w); }
     else { context.moveTo(len, 0); context.quadraticCurveTo(len*0.6, w, -len*0.8, w); context.lineTo(-len, w*0.7); context.lineTo(-len, -w*0.7); context.quadraticCurveTo(len*0.6, -w, len, 0); }
-    context.closePath(); context.fill(); context.stroke();
-    context.fillStyle = 'rgba(0,0,0,0.15)'; context.beginPath(); context.ellipse(0, 0, len*0.6, w*0.6, 0, 0, Math.PI*2); context.fill();
-    context.restore();
+    context.closePath();
 }
 
 function drawPlayerShipModel(context, nation, hullColor, x, y, angle, turretAngle, radius = 50, scale = 1) {
@@ -887,21 +888,22 @@ function drawPlayerShipModel(context, nation, hullColor, x, y, angle, turretAngl
     context.scale(scale, scale);
     drawDetailedHull(context, nation, radius, hullColor, true);
     for (let i = 0; i < (config.secondary.turrets || 8); i++) {
-        const side = i % 2 === 0 ? 1 : -1, step = Math.floor(i / 2), ox = -20 + step * 10, oy = side * 32;
-        context.fillStyle = '#334155'; context.strokeStyle = '#000'; context.beginPath(); context.arc(ox, oy, 5, 0, Math.PI * 2); context.fill(); context.stroke();
+        const mount = getSecondaryMount(nation, radius, i);
+        context.save(); context.translate(mount.x, mount.y); context.rotate(mount.side * Math.PI / 2);
+        NavalArt.turret(context, 5.5, 1, 6); context.restore();
     }
     for (let i = 0; i < config.main.turrets; i++) {
         context.save(); context.translate((i - (config.main.turrets - 1) / 2) * (radius * 0.7), 0); context.rotate(turretAngle - angle);
-        const turretSize = 22; context.fillStyle = '#475569'; context.strokeStyle = '#000'; context.lineWidth = 2;
-        context.beginPath(); context.rect(-turretSize / 2, -turretSize / 2, turretSize, turretSize); context.fill(); context.stroke();
-        context.fillStyle = '#000';
-        for (let barrel = 0; barrel < config.main.barrels; barrel++) {
-            const barrelY = (barrel - (config.main.barrels - 1) / 2) * 5;
-            context.fillRect(turretSize / 2, barrelY - 1.5, 24, 3);
-        }
+        NavalArt.turret(context, 22, config.main.barrels, 24);
         context.restore();
     }
     context.restore();
+}
+
+function getSecondaryMount(nation, radius, index) {
+    const side = index % 2 === 0 ? 1 : -1;
+    const pairs = Math.ceil((NATIONS[nation].secondary.turrets || 8) / 2);
+    return { x: (Math.floor(index / 2) - (pairs - 1) / 2) * radius * 0.18, y: side * radius * 0.28, side };
 }
 
 /** * ==========================================
@@ -942,13 +944,13 @@ class Drop {
 }
 
 class Projectile {
-    constructor(x, y, a, f, s, d, c, sz) { this.x = x; this.y = y; this.vx = Math.cos(a)*s; this.vy = Math.sin(a)*s; this.friendly = f; this.damage = d; this.color = c; this.size = sz; this.life = 8000; }
+    constructor(x, y, a, f, s, d, c, sz) { this.x = x; this.y = y; this.originX = x; this.originY = y; this.vx = Math.cos(a)*s; this.vy = Math.sin(a)*s; this.friendly = f; this.damage = d; this.color = c; this.size = sz; this.life = 8000; }
     update(dt) {
         this.x += this.vx*(dt/16.6); this.y += this.vy*(dt/16.6); this.life -= dt;
         if (this.friendly) { enemies.forEach(e => { if (Math.hypot(e.x-this.x, e.y-this.y) < e.radius+10) { e.health -= this.damage; damagePopups.push({ x: e.x, y: e.y, text: Math.round(this.damage), color: '#fff', life: 1000, vy: -1.5 }); this.life = 0; SoundManager.playScrap(); } }); }
         else if (player && Math.hypot(player.x-this.x, player.y-this.y) < player.radius+5) { player.health -= this.damage; damagePopups.push({ x: player.x, y: player.y, text: Math.round(this.damage), color: '#ef4444', life: 1000, vy: -1.5 }); this.life = 0; }
     }
-    draw() { ctx.fillStyle = this.color; ctx.beginPath(); ctx.arc(this.x, this.y, this.size, 0, Math.PI*2); ctx.fill(); }
+    draw() { NavalArt.shell(ctx, this); }
 }
 
 class Player {
@@ -982,6 +984,7 @@ class Player {
         resolveIslandCollision(this);
 
         // Advanced Wake Emission
+        NavalArt.recordWake(this, dt);
         if (Math.hypot(this.vx, this.vy) > 0.25) {
             const speed = Math.hypot(this.vx, this.vy);
             // Stern White-Water Churn
@@ -1025,7 +1028,7 @@ class Player {
         return target;
     }
     fireSec(idx, target) {
-        const side = idx % 2 === 0 ? 1 : -1, step = Math.floor(idx / 2), relX = -20 + step * 10, relY = side * 32;
+        const mount = getSecondaryMount(this.nation, this.radius, idx), relX = mount.x, relY = mount.y;
         const tX = this.x + Math.cos(this.angle) * relX - Math.sin(this.angle) * relY, tY = this.y + Math.sin(this.angle) * relX + Math.cos(this.angle) * relY;
         const shotAngle = Math.atan2(target.y - tY, target.x - tX) + (Math.random()-0.5)*PLAYER_PROJECTILE_SPECS.secondary.spread*this.secondarySpreadMult;
         projectiles.push(new Projectile(tX, tY, shotAngle, true, getPlayerShellSpeed(this.nation, 'secondary'), this.config.secondary.damage * this.damageMult, '#fff', PLAYER_PROJECTILE_SPECS.secondary.radius));
@@ -1137,6 +1140,7 @@ class Enemy {
         this.y += this.vy * ts;
         resolveIslandCollision(this);
         this.currentSpeed = Math.hypot(this.vx, this.vy);
+        NavalArt.recordWake(this, dt);
 
         // Enemy Wake Enhancement
         if (this.currentSpeed > 0.25) {
@@ -1164,7 +1168,7 @@ class Enemy {
         drawDetailedHull(ctx, this.nation, this.radius, '#334155');
         for(let i=0; i<this.spec.turrets; i++) {
             ctx.save(); const ox = (i - (this.spec.turrets-1)/2) * (this.radius*0.8); ctx.translate(ox, 0); ctx.rotate(this.turretAngle - this.angle);
-            ctx.fillStyle = '#1e293b'; ctx.fillRect(-9, -9, 18, 18); ctx.fillStyle = '#000'; ctx.fillRect(9, -2.5, 18, 5); ctx.restore();
+            NavalArt.turret(ctx, 18, 1, 18); ctx.restore();
         }
         ctx.restore();
     }
@@ -1174,95 +1178,75 @@ class Enemy {
  * WORLD SYSTEMS
  * ==========================================
  */
-function initIslands() {
-    islands = [];
-    for(let i=0; i<15; i++) {
-        const radius = 600 + Math.random() * 500;
-        const isl = { x: (Math.random()-0.5)*18000, y: (Math.random()-0.5)*18000, radius: radius, seed1: Math.random() * 10, seed2: Math.random() * 10, trees: [], rocks: [], hills: [] };
-        const treeCount = Math.floor(radius / 12);
-        for(let t=0; t<treeCount; t++) {
-            const tr = Math.random() * (radius * 0.62), ta = Math.random() * Math.PI * 2;
-            isl.trees.push({ x: Math.cos(ta)*tr, y: Math.sin(ta)*tr, size: 18+Math.random()*25, color: ['#14532d', '#166534', '#15803d'][Math.floor(Math.random()*3)] });
-        }
-        for (let h = 0; h < 5; h++) {
-            const hr = radius * (0.12 + Math.random() * 0.3), ha = Math.random() * Math.PI * 2;
-            isl.hills.push({ x: Math.cos(ha) * hr, y: Math.sin(ha) * hr, width: 70 + Math.random() * 95, height: 45 + Math.random() * 65, angle: Math.random() * Math.PI });
-        }
-        for (let r = 0; r < Math.floor(radius / 70); r++) {
-            const rr = radius * (0.2 + Math.random() * 0.5), ra = Math.random() * Math.PI * 2;
-            isl.rocks.push({ x: Math.cos(ra) * rr, y: Math.sin(ra) * rr, size: 9 + Math.random() * 15, angle: Math.random() * Math.PI });
-        }
-        buildIslandBuffer(isl);
-        islands.push(isl);
-    }
+// Conservative visual envelopes leave navigable water, including halo/shadow.
+const ISLAND_WATER_GAP = 450;
+const ISLAND_SPAWN_CLEARANCE = 700;
+function islandPlacementExtent(island) {
+    return island.radius * ISLAND_MAX_SHORELINE_SCALE + ISLAND_MAX_STROKE_PADDING + Math.hypot(ISLAND_SHADOW_OFFSET.x, ISLAND_SHADOW_OFFSET.y);
 }
+function createIslandLayout(random = Math.random) {
+    const layout = [];
+    const variantOrder = Array.from({ length: NavalArt.variantCount }, (_, i) => i);
+    for (let i = variantOrder.length - 1; i > 0; i--) {
+        const j = Math.floor(random() * (i + 1));
+        [variantOrder[i], variantOrder[j]] = [variantOrder[j], variantOrder[i]];
+    }
+    for(let i=0; i<15; i++) {
+        const isl = { radius: 600 + random() * 500, seed1: random() * 10, seed2: random() * 10,
+            artVariant: variantOrder[i % variantOrder.length], trees: [], rocks: [], hills: [] };
+        const extent = islandPlacementExtent(isl);
+        let placed = false;
+        for (let attempt = 0; attempt < 256; attempt++) {
+            isl.x = (random() - 0.5) * 18000; isl.y = (random() - 0.5) * 18000;
+            if (Math.hypot(isl.x, isl.y) < extent + ISLAND_SPAWN_CLEARANCE) continue;
+            if (layout.some(other => Math.hypot(isl.x - other.x, isl.y - other.y) < extent + islandPlacementExtent(other) + ISLAND_WATER_GAP)) continue;
+            placed = true; break;
+        }
+        // Bounded fallback for pathological randomness; the sea has no hard edge.
+        if (!placed) {
+            const outerEdge = layout.reduce((edge, other) => Math.max(edge, Math.hypot(other.x, other.y) + islandPlacementExtent(other)), ISLAND_SPAWN_CLEARANCE);
+            const distance = outerEdge + extent + ISLAND_WATER_GAP;
+            const angle = i * 2.399963229728653;
+            isl.x = Math.cos(angle) * distance; isl.y = Math.sin(angle) * distance;
+        }
+        layout.push(isl);
+    }
+    return layout;
+}
+function initIslands() {
+    islands = createIslandLayout();
+    islands.forEach(buildIslandBuffer);
+}
+
 
 function renderIslandToBuffer(bCtx, isl, radius, centerX, centerY) {
     bCtx.save();
     bCtx.translate(ISLAND_SHADOW_OFFSET.x, ISLAND_SHADOW_OFFSET.y);
     traceIslandLayer(bCtx, isl, radius, centerX, centerY, ISLAND_LAYERS[0]);
-    bCtx.fillStyle = 'rgba(3, 15, 22, 0.38)';
+    bCtx.fillStyle = 'rgba(4, 27, 33, 0.35)';
     bCtx.fill();
     bCtx.restore();
 
-    ISLAND_LAYERS.forEach((layer, index) => {
-        traceIslandLayer(bCtx, isl, radius, centerX, centerY, layer);
-        bCtx.fillStyle = islandLayerGradient(bCtx, centerX, centerY, radius, layer);
-        bCtx.fill();
-        bCtx.strokeStyle = index === 0 ? 'rgba(70, 38, 24, 0.85)' : 'rgba(11, 41, 31, 0.58)';
-        bCtx.lineWidth = ISLAND_LAYER_STROKE_WIDTHS[index];
-        bCtx.stroke();
-    });
-
-    bCtx.save();
-    bCtx.globalAlpha = 0.48;
-    bCtx.strokeStyle = '#173d32';
-    bCtx.lineWidth = 7;
-    [0.49, 0.32].forEach(scale => {
-        const contour = { ...ISLAND_LAYERS[ISLAND_LAYERS.length - 1], r: scale, noise: 0.045 };
-        traceIslandLayer(bCtx, isl, radius, centerX, centerY, contour);
-        bCtx.stroke();
-    });
-    bCtx.globalAlpha = 0.32;
-    bCtx.strokeStyle = '#b8d77b';
-    bCtx.lineWidth = 3;
-    const highlight = { ...ISLAND_LAYERS[2], r: 0.78, noise: 0.06 };
-    traceIslandLayer(bCtx, isl, radius, centerX, centerY, highlight);
+    traceIslandLayer(bCtx, isl, radius, centerX, centerY, ISLAND_LAYERS[0]);
+    bCtx.strokeStyle = 'rgba(86, 181, 164, 0.25)';
+    bCtx.lineWidth = 36;
+    bCtx.lineJoin = 'round';
     bCtx.stroke();
-    bCtx.restore();
+    NavalArt.island(bCtx, isl, centerX, centerY, angle => outerIslandShorelineRadius(isl, angle));
 
-    isl.hills.forEach(hill => {
-        bCtx.save();
-        bCtx.translate(centerX + hill.x + 10, centerY + hill.y + 14);
-        bCtx.rotate(hill.angle);
-        bCtx.fillStyle = 'rgba(12, 38, 29, 0.28)';
-        bCtx.beginPath(); bCtx.ellipse(0, 0, hill.width * 1.08, hill.height * 0.92, 0, 0, Math.PI * 2); bCtx.fill();
-        bCtx.translate(-10, -14);
-        bCtx.fillStyle = 'rgba(116, 180, 91, 0.22)';
-        bCtx.beginPath(); bCtx.ellipse(0, 0, hill.width, hill.height, 0, 0, Math.PI * 2); bCtx.fill();
-        bCtx.restore();
-    });
-
-    isl.rocks.forEach(rock => {
-        bCtx.save();
-        bCtx.translate(centerX + rock.x + 7, centerY + rock.y + 9);
-        bCtx.rotate(rock.angle);
-        bCtx.fillStyle = 'rgba(8, 25, 25, 0.35)';
-        bCtx.beginPath(); bCtx.ellipse(0, 0, rock.size * 1.2, rock.size * 0.72, 0, 0, Math.PI * 2); bCtx.fill();
-        bCtx.translate(-7, -9);
-        bCtx.fillStyle = '#53685b';
-        bCtx.beginPath(); bCtx.moveTo(-rock.size, rock.size * 0.35); bCtx.lineTo(-rock.size * 0.55, -rock.size * 0.7); bCtx.lineTo(rock.size * 0.25, -rock.size); bCtx.lineTo(rock.size, rock.size * 0.15); bCtx.lineTo(rock.size * 0.45, rock.size * 0.75); bCtx.closePath(); bCtx.fill();
-        bCtx.fillStyle = 'rgba(222, 237, 190, 0.4)';
-        bCtx.beginPath(); bCtx.moveTo(-rock.size * 0.5, -rock.size * 0.5); bCtx.lineTo(rock.size * 0.25, -rock.size); bCtx.lineTo(rock.size * 0.05, -rock.size * 0.3); bCtx.closePath(); bCtx.fill();
-        bCtx.restore();
-    });
-
-    isl.trees.forEach(tree => {
-        bCtx.fillStyle = 'rgba(0,0,0,0.25)'; bCtx.beginPath(); bCtx.arc(centerX + tree.x + 6, centerY + tree.y + 6, tree.size, 0, Math.PI * 2); bCtx.fill();
-        bCtx.fillStyle = tree.color; bCtx.beginPath(); bCtx.arc(centerX + tree.x, centerY + tree.y, tree.size, 0, Math.PI * 2); bCtx.fill();
-        bCtx.fillStyle = 'rgba(255,255,255,0.2)'; bCtx.beginPath(); bCtx.arc(centerX + tree.x - tree.size*0.3, centerY + tree.y - tree.size*0.3, tree.size*0.42, 0, Math.PI * 2); bCtx.fill();
-        bCtx.fillStyle = 'rgba(5, 35, 27, 0.25)'; bCtx.beginPath(); bCtx.arc(centerX + tree.x + tree.size*0.25, centerY + tree.y + tree.size*0.3, tree.size*0.72, 0, Math.PI * 2); bCtx.fill();
-    });
+    // Broken coast foam is a water effect outside the solid collision coast.
+    bCtx.strokeStyle = 'rgba(230, 239, 217, 0.55)';
+    bCtx.lineWidth = 2;
+    for (let i = 0; i < 128; i++) {
+        if (Math.sin(i * 1.7 + isl.seed1) < -0.15) continue;
+        const a = i * Math.PI / 64, b = a + Math.PI / 110;
+        const r1 = outerIslandShorelineRadius(isl, a) + 4;
+        const r2 = outerIslandShorelineRadius(isl, b) + 4;
+        bCtx.beginPath();
+        bCtx.moveTo(centerX + Math.cos(a) * r1, centerY + Math.sin(a) * r1);
+        bCtx.lineTo(centerX + Math.cos(b) * r2, centerY + Math.sin(b) * r2);
+        bCtx.stroke();
+    }
 }
 
 function drawMinimap() {
@@ -1312,19 +1296,150 @@ function gameLoop(timestamp) {
                 accumulator -= TIME_STEP;
             }
         }
-        ctx.fillStyle = '#0c4a6e'; ctx.fillRect(0, 0, width, height);
-        ctx.save(); ctx.translate(width/2, height/2); ctx.scale(zoom, zoom); ctx.translate(-player.x, -player.y);
-        islands.forEach(isl => {
-            const drawPosition = islandBufferWorldPosition(isl);
-            ctx.drawImage(isl.buffer, drawPosition.x, drawPosition.y);
-        });
-        particles.forEach(p => p.draw());
-        enemies.forEach(e => e.draw()); if (player) player.draw(); drops.forEach(d => d.draw()); projectiles.forEach(p => p.draw());
-        damagePopups.forEach(p => { ctx.save(); ctx.globalAlpha = p.life / 1000; ctx.font = 'bold 32px monospace'; ctx.textAlign = 'center'; ctx.fillStyle = p.color; ctx.fillText(p.text, p.x, p.y); ctx.restore(); });
-        ctx.restore();
-        drawMinimap(); updateDOM();
+        renderGameFrame(timestamp);
     }
     requestAnimationFrame(gameLoop);
+}
+
+function renderGameFrame(timestamp) {
+        const profile = window.RenderProfile;
+        profile?.beginFrame();
+        if (activeRenderer === 'PixiJS/WebGL' && pixiRenderer?.ready) {
+            const state = Object.freeze({ islands, enemies, player, particles, drops, projectiles, damagePopups });
+            const camera = Object.freeze({ x: player.x, y: player.y, zoom });
+            const viewport = Object.freeze({ width, height });
+            pixiRenderer.render(state, camera, viewport, timestamp, profile);
+            return;
+        }
+        drawCanvasFrame(timestamp, profile);
+}
+
+function drawCanvasFrame(timestamp, profile) {
+        const view={left:player.x-width/(2*zoom),right:player.x+width/(2*zoom),top:player.y-height/(2*zoom),bottom:player.y+height/(2*zoom),zoom};
+        ctx.save(); ctx.translate(width/2, height/2); ctx.scale(zoom, zoom); ctx.translate(-player.x, -player.y);
+        profile?.begin('ocean');
+        if (!profile || profile.enabled('water')) {
+        NavalArt.ocean(ctx, player.x - width / (2 * zoom), player.y - height / (2 * zoom), width / zoom, height / zoom, timestamp);
+        } else { ctx.fillStyle = '#123f4c'; ctx.fillRect(player.x-width/(2*zoom),player.y-height/(2*zoom),width/zoom,height/zoom); }
+        profile?.end('ocean'); profile?.begin('islands');
+        if (!profile || profile.enabled('islands')) {
+        islands.forEach(isl => {
+            const drawPosition = islandBufferWorldPosition(isl);
+            const geometry = isl.renderGeometry;
+            if (drawPosition.x > player.x + width / (2 * zoom) || drawPosition.y > player.y + height / (2 * zoom) ||
+                drawPosition.x + geometry.bufferWidth < player.x - width / (2 * zoom) || drawPosition.y + geometry.bufferHeight < player.y - height / (2 * zoom)) return;
+            ctx.drawImage(isl.buffer, drawPosition.x, drawPosition.y, geometry.bufferWidth, geometry.bufferHeight);
+        });
+        }
+        profile?.end('islands'); profile?.begin('wakes');
+        if (!profile || profile.enabled('wakes')) {
+        enemies.forEach(e => NavalArt.wake(ctx, e, view)); NavalArt.wake(ctx, player, view);
+        }
+        profile?.end('wakes'); profile?.begin('particles');
+        particles.forEach(p => p.draw());
+        profile?.end('particles'); profile?.begin('ships');
+        enemies.forEach(e => e.draw()); if (player) player.draw(); drops.forEach(d => d.draw());
+        profile?.end('ships'); profile?.begin('projectiles');
+        if (!profile || profile.enabled('tracers')) projectiles.forEach(p => p.draw());
+        profile?.end('projectiles'); profile?.begin('popups');
+        damagePopups.forEach(p => { ctx.save(); ctx.globalAlpha = p.life / 1000; ctx.font = 'bold 32px monospace'; ctx.textAlign = 'center'; ctx.fillStyle = p.color; ctx.fillText(p.text, p.x, p.y); ctx.restore(); });
+        ctx.restore();
+        profile?.end('popups'); profile?.begin('minimapUI');
+        drawMinimap(); updateDOM();
+        profile?.end('minimapUI'); profile?.endFrame();
+}
+
+async function loadPixiRenderer() {
+    if (pixiRendererLoad) return pixiRendererLoad;
+    pixiRendererLoad = new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = 'assets/generated/pixi-renderer.js';
+        script.onload = () => resolve(window.PixiGameRenderer);
+        script.onerror = () => reject(new Error('Local Pixi renderer bundle is missing. Run npm run build.'));
+        document.head.appendChild(script);
+    });
+    return pixiRendererLoad;
+}
+
+let rendererInputTarget = null;
+function setRendererInputTarget(target) {
+    rendererInputTarget?.removeEventListener('mousedown', canvasMouseInput);
+    rendererInputTarget?.removeEventListener('touchstart', canvasTouchInput);
+    rendererInputTarget = target;
+    rendererInputTarget?.addEventListener('mousedown', canvasMouseInput);
+    rendererInputTarget?.addEventListener('touchstart', canvasTouchInput, { passive: true });
+}
+const canvasMouseInput = e => handleInput(e.clientX, e.clientY, e.button === 2);
+const canvasTouchInput = e => handleInput(e.touches[0].clientX, e.touches[0].clientY, false);
+
+async function switchRenderer(name) {
+    if (!rendererLabEnabled && name !== 'Canvas2D') throw new Error('Renderer experiment is local-only.');
+    if (name === 'Canvas2D') {
+        recoverPixiAfterContextLoss = false;
+        activeRenderer = name; canvas.style.visibility = 'visible';
+        pixiRenderer?.setVisible(false); setRendererInputTarget(canvas); return;
+    }
+    if (name !== 'PixiJS/WebGL') throw new Error(`Unknown renderer: ${name}`);
+    const Renderer = await loadPixiRenderer();
+    if (!pixiRenderer?.ready) {
+        pixiRenderer = await new Renderer().init({ width, height });
+        pixiRenderer.appCanvas.addEventListener('renderer-context-lost', () => {
+            recoverPixiAfterContextLoss = activeRenderer === 'PixiJS/WebGL';
+            if (recoverPixiAfterContextLoss) { contextLossFallbacks++; activeRenderer = 'Canvas2D'; canvas.style.visibility = 'visible'; setRendererInputTarget(canvas); }
+        });
+        pixiRenderer.appCanvas.addEventListener('renderer-context-restored', () => {
+            if (rendererLabEnabled && recoverPixiAfterContextLoss) {
+                recoverPixiAfterContextLoss = false;
+                pixiRenderer.setVisible(true);
+                activeRenderer = 'PixiJS/WebGL'; canvas.style.visibility = 'hidden'; setRendererInputTarget(pixiRenderer.appCanvas);
+            }
+        });
+    }
+    pixiRenderer.setVisible(true); canvas.style.visibility = 'hidden';
+    activeRenderer = name; setRendererInputTarget(pixiRenderer.appCanvas);
+}
+
+async function restartPixiRenderer() {
+    const resumePixi = activeRenderer === 'PixiJS/WebGL';
+    if (pixiRenderer) pixiRenderer.dispose();
+    pixiRenderer = null; activeRenderer = 'Canvas2D'; canvas.style.visibility = 'visible'; setRendererInputTarget(canvas);
+    if (resumePixi) await switchRenderer('PixiJS/WebGL');
+    return activeRenderer;
+}
+
+if (rendererLabEnabled) {
+    const panel = document.createElement('aside');
+    Object.assign(panel.style, { position: 'fixed', zIndex: '100', left: '12px', bottom: '12px', padding: '10px',
+        color: '#dbeafe', background: 'rgba(8,18,34,.92)', border: '1px solid #47627d', borderRadius: '8px',
+        font: '12px monospace', display: 'grid', gap: '6px' });
+    panel.innerHTML = '<div id="renderer-lab-stats">Renderer lab loading…</div><div style="display:flex;gap:4px"><button data-render="Canvas2D">Canvas2D</button><button data-render="PixiJS/WebGL">PixiJS/WebGL</button><button data-restart>Restart</button><button data-context>Lose context</button></div>';
+    document.body.appendChild(panel);
+    panel.querySelectorAll('[data-render]').forEach(button => button.addEventListener('click', () => switchRenderer(button.dataset.render).catch(error => {
+        document.getElementById('renderer-lab-stats').textContent = error.message;
+    })));
+    panel.querySelector('[data-restart]').addEventListener('click', () => restartPixiRenderer().catch(error => {
+        document.getElementById('renderer-lab-stats').textContent = error.message;
+    }));
+    panel.querySelector('[data-context]').addEventListener('click', () => pixiRenderer?.forceContextLoss());
+    window.RendererExperiment = {
+        ready: Promise.resolve(NavalArt.ready).then(ok => ok && new URLSearchParams(location.search).has('renderer=pixi') ? switchRenderer('PixiJS/WebGL') : undefined),
+        switchTo: switchRenderer,
+        restart: restartPixiRenderer,
+        forceContextLoss: () => pixiRenderer?.forceContextLoss(),
+        forceContextRestore: () => pixiRenderer?.forceContextRestore(),
+        dispose: () => { activeRenderer = 'Canvas2D'; canvas.style.visibility = 'visible'; setRendererInputTarget(canvas); pixiRenderer?.dispose(); pixiRenderer = null; },
+        diagnostics: () => ({ ...pixiRenderer?.renderInfo(), renderer: activeRenderer, contextLossFallbacks })
+    };
+    const stats = document.getElementById('renderer-lab-stats');
+    let previous = performance.now(), lastPaint = previous, recent = [];
+    const updateStats = () => { const now = performance.now(); recent.push(now - previous); previous = now; if (recent.length > 120) recent.shift();
+        if (now - lastPaint >= 250) {
+        const ordered = [...recent].sort((a,b)=>a-b), pct = q => ordered[Math.min(ordered.length-1, Math.floor(ordered.length*q))] || 0;
+        stats.textContent = `${activeRenderer} · ${Math.round(1000/(recent.reduce((a,b)=>a+b,0)/Math.max(1,recent.length)))} FPS · frame p50/p95/p99 ${pct(.5).toFixed(1)}/${pct(.95).toFixed(1)}/${pct(.99).toFixed(1)} ms · ${pixiRenderer?.renderInfo().wakeSprites || 0} wake sprites`;
+        lastPaint = now;
+        }
+        requestAnimationFrame(updateStats); };
+    requestAnimationFrame(updateStats);
 }
 
 function updateDOM() {
@@ -1436,7 +1551,9 @@ function startGame() {
             angledPlayer.x = 100; angledPlayer.y = 100; angledPlayer.vx = -5; angledPlayer.vy = -5;
             resolveIslandCollision(angledPlayer);
             const angledDistance = Math.hypot(angledPlayer.x, angledPlayer.y);
-            const angledClear = angledDistance >= outerIslandShorelineRadius(island, Math.atan2(angledPlayer.y, angledPlayer.x)) + shipIslandClearance(angledPlayer);
+            const angledRequired = outerIslandShorelineRadius(island, Math.atan2(angledPlayer.y, angledPlayer.x)) + shipIslandClearance(angledPlayer);
+            // Trigonometric projection can round inward by ~3e-14 world pixels.
+            const angledClear = angledDistance + 1e-9 >= angledRequired;
 
             const enemy = new Enemy('DESTROYER', 'Japan');
             enemy.x = 140; enemy.y = 0; enemy.angle = Math.PI;
@@ -1449,6 +1566,7 @@ function startGame() {
             return {
                 playerStopped,
                 angledClear,
+                angledClearanceDelta: angledDistance - angledRequired,
                 enemyClear,
                 playerHullClearance: playerClearance > testPlayer.radius,
                 germanRenderLength: germanDimensions.length,
@@ -1459,27 +1577,18 @@ function startGame() {
         };
     }
     if (new URLSearchParams(window.location.search).has('verify-island-detail')) {
-        window.__verifyIslandDetail = () => {
-            const fixture = { x: 0, y: 0, radius: 500, seed1: 1.5, seed2: 2.2, trees: [], rocks: [], hills: [] };
-            for (let i = 0; i < 34; i++) {
-                const angle = i * 0.91;
-                const distance = 85 + (i % 7) * 34;
-                fixture.trees.push({ x: Math.cos(angle) * distance, y: Math.sin(angle) * distance, size: 16 + (i % 4) * 4, color: ['#14532d', '#166534', '#15803d'][i % 3] });
-            }
-            for (let i = 0; i < 7; i++) {
-                const angle = i * 1.37;
-                const distance = 110 + (i % 3) * 75;
-                fixture.hills.push({ x: Math.cos(angle) * distance, y: Math.sin(angle) * distance, width: 85 + (i % 3) * 22, height: 54 + (i % 2) * 20, angle: angle + 0.4 });
-                fixture.rocks.push({ x: Math.cos(angle + 0.5) * (distance + 55), y: Math.sin(angle + 0.5) * (distance + 55), size: 11 + (i % 4) * 3, angle: angle });
-            }
+        window.__verifyIslandDetail = (artVariant = 0) => {
+            const fixture = { x: 0, y: 0, radius: 500, seed1: 1.5, seed2: 2.2, artVariant, trees: [], rocks: [], hills: [] };
             const originalIslands = islands;
             islands = [fixture];
             buildIslandBuffer(fixture);
             const geometry = fixture.renderGeometry;
             let sampledMinX = Infinity, sampledMaxX = -Infinity, sampledMinY = Infinity, sampledMaxY = -Infinity;
+            let sampledMaximumShorelineRadius = 0;
             let shorelineMatchesCollision = true;
             for (let angle = 0; angle <= Math.PI * 2 + 0.1; angle += Math.PI / 64) {
                 const shorelineRadius = outerIslandShorelineRadius(fixture, angle);
+                sampledMaximumShorelineRadius = Math.max(sampledMaximumShorelineRadius, shorelineRadius);
                 const renderedOuterRadius = islandLayerRadius(fixture, angle, ISLAND_LAYERS[0]);
                 shorelineMatchesCollision &&= Math.abs(renderedOuterRadius - shorelineRadius) < 1e-9;
                 const shorelineX = Math.cos(angle) * shorelineRadius;
@@ -1503,15 +1612,38 @@ function startGame() {
             };
             const drawPosition = islandBufferWorldPosition(fixture);
             const worldCenterPreserved = Math.abs(drawPosition.x + geometry.centerX - fixture.x) < 0.001 && Math.abs(drawPosition.y + geometry.centerY - fixture.y) < 0.001;
+            const landContext = fixture.buffer.getContext('2d');
+            let opaqueCoastSamples = 0, clearOffshoreSamples = 0;
+            const coastPoints = Array.from({ length: 128 }, (_, i) => {
+                const a = i * Math.PI / 64, r = outerIslandShorelineRadius(fixture, a);
+                return { x: Math.cos(a) * r, y: Math.sin(a) * r };
+            });
+            const distanceToCoast = (x, y) => Math.min(...coastPoints.map((p, i) => {
+                const q = coastPoints[(i + 1) % coastPoints.length], dx = q.x - p.x, dy = q.y - p.y;
+                const t = Math.max(0, Math.min(1, ((x - p.x) * dx + (y - p.y) * dy) / (dx * dx + dy * dy)));
+                return Math.hypot(x - p.x - t * dx, y - p.y - t * dy);
+            }));
+            for (let i = 0; i < 128; i++) {
+                const angle = i * Math.PI / 64, coast = outerIslandShorelineRadius(fixture, angle);
+                const alphaAt = radius => {
+                    const x = Math.round(geometry.centerX + Math.cos(angle) * radius);
+                    const y = Math.round(geometry.centerY + Math.sin(angle) * radius);
+                    if (x < 0 || y < 0 || x >= fixture.buffer.width || y >= fixture.buffer.height) return 0;
+                    return landContext.getImageData(x, y, 1, 1).data[3];
+                };
+                if (alphaAt(coast - 12) >= 250) opaqueCoastSamples++;
+                // A radial offset can still touch a neighboring headland's halo.
+                // Require 84px clearance from every actual coast segment instead.
+                let offshore = coast + 84;
+                while (offshore < geometry.maximumShorelineRadius + 100 &&
+                    distanceToCoast(Math.cos(angle) * offshore, Math.sin(angle) * offshore) < 84) offshore += 8;
+                if (alphaAt(offshore) === 0) clearOffshoreSamples++;
+            }
             player.x = -680; player.y = 0; player.vx = 0; player.vy = 0;
             enemies = enemies.slice(0, 1);
             enemies.forEach(enemy => { enemy.x = 3000; enemy.y = 3000; });
             gameState = 'PAUSED';
             return {
-                layerCount: ISLAND_LAYERS.length,
-                hillCount: fixture.hills.length,
-                rockCount: fixture.rocks.length,
-                treeCount: fixture.trees.length,
                 shorelineRadius: outerIslandShorelineRadius(fixture, 0),
                 bufferWidth: fixture.buffer.width,
                 bufferHeight: fixture.buffer.height,
@@ -1532,6 +1664,7 @@ function startGame() {
                     bottom: geometry.bufferHeight - geometry.maxRenderY
                 },
                 maximumShorelineRadius: geometry.maximumShorelineRadius,
+                sampledMaximumShorelineRadius,
                 shadowOffset: geometry.shadowOffset,
                 strokePadding: geometry.strokePadding,
                 requestedPadding: geometry.padding,
@@ -1541,7 +1674,9 @@ function startGame() {
                 theoreticalBoundsFit: geometry.minRenderX >= 0 && geometry.minRenderY >= 0 && geometry.maxRenderX <= geometry.bufferWidth && geometry.maxRenderY <= geometry.bufferHeight,
                 shorelineMatchesCollision,
                 worldCenterPreserved,
-                originalIslandCount: originalIslands.length
+                originalIslandCount: originalIslands.length,
+                paintedTerrain: NavalArt.stats.ready && NavalArt.stats.islandPaints > 0,
+                opaqueCoastSamples, clearOffshoreSamples
             };
         };
     }
@@ -1736,7 +1871,7 @@ function startGame() {
     }
 }
 
-function resize() { width = window.innerWidth; height = window.innerHeight; canvas.width = width; canvas.height = height; mCanvas.width = 280; mCanvas.height = 280; }
+function resize() { width = window.innerWidth; height = window.innerHeight; canvas.width = width; canvas.height = height; mCanvas.width = 280; mCanvas.height = 280; pixiRenderer?.resize(width, height); }
 window.addEventListener('resize', resize); resize();
 window.addEventListener('keydown', e => {
     keys[e.code] = true;
@@ -1780,9 +1915,12 @@ const handleInput = (clientX, clientY, isRightClick = false) => {
     }
 };
 
-canvas.addEventListener('mousedown', e => { handleInput(e.clientX, e.clientY, e.button === 2); });
-canvas.addEventListener('touchstart', e => { handleInput(e.touches[0].clientX, e.touches[0].clientY, false); }, { passive: true });
+setRendererInputTarget(canvas);
 window.addEventListener('wheel', e => { zoom = Math.max(0.1, Math.min(2.0, zoom - e.deltaY * 0.001)); }, { passive: false });
+// Local-only, opt-in diagnostic. No script, UI or timing buffers in normal play.
+if (['localhost', '127.0.0.1', '[::1]'].includes(location.hostname) && new URLSearchParams(location.search).has('profile-render')) {
+    const diagnostic = document.createElement('script'); diagnostic.src = 'render-profile.js'; document.head.appendChild(diagnostic);
+}
 </script>
 
 </body></html>

@@ -9,8 +9,24 @@ const outputDirectory = "output/playwright";
 
 const server = createServer(async (_request, response) => {
   try {
-    response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-    response.end(await readFile("index.html"));
+    const pathname = new URL(_request.url, baseUrl).pathname;
+    const files = {
+      '/': ['index.html', 'text/html; charset=utf-8'],
+      '/index.html': ['index.html', 'text/html; charset=utf-8'],
+      '/naval-art.js': ['naval-art.js', 'text/javascript; charset=utf-8'],
+      '/render-profile.js': ['render-profile.js', 'text/javascript; charset=utf-8'],
+      '/assets/art/ocean.png': ['assets/art/ocean.png', 'image/png'],
+      '/assets/art/island.png': ['assets/art/island.png', 'image/png'],
+      '/assets/art/island-lowland.png': ['assets/art/island-lowland.png', 'image/png'],
+      '/assets/art/island-spine.png': ['assets/art/island-spine.png', 'image/png'],
+      '/assets/art/ship-deck.png': ['assets/art/ship-deck.png', 'image/png'],
+      '/assets/generated/pixi-renderer.js': ['assets/generated/pixi-renderer.js', 'text/javascript; charset=utf-8']
+    };
+    const file = files[pathname];
+    if (!file) { response.writeHead(404); response.end('Not found'); return; }
+    const bytes = await readFile(file[0]);
+    response.writeHead(200, { 'content-type': file[1] });
+    response.end(bytes);
   } catch (error) {
     response.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
     response.end(error.message);
@@ -374,6 +390,265 @@ async function verifyIslandCollision(browser) {
   await page.close();
 }
 
+async function verifyPaintedArt(browser) {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.goto(`${baseUrl}/?verify-island-detail`);
+  await page.getByRole('button', { name: 'Click to Engage', exact: true }).click();
+  await page.getByRole('button', { name: 'Skirmish', exact: true }).click();
+  await page.getByRole('button', { name: /US NAVY/ }).click();
+  await page.getByText('BATTLESHIP', { exact: true }).waitFor();
+  const artPreviews = await page.evaluate(() => {
+    const render = (items, width, height, scale, offsetX, offsetY) => {
+      const c = document.createElement('canvas'); c.width = width; c.height = height;
+      const context = c.getContext('2d'); NavalArt.ocean(context, 0, 0, width, height);
+      context.translate(offsetX, offsetY); context.scale(scale, scale);
+      for (const island of items) {
+        const p = islandBufferWorldPosition(island), g = island.renderGeometry;
+        context.drawImage(island.buffer, p.x, p.y, g.bufferWidth, g.bufferHeight);
+      }
+      return c.toDataURL().split(',')[1];
+    };
+    const gallery = Array.from({ length: NavalArt.variantCount }, (_, artVariant) => {
+      const island = { x: artVariant * 1600, y: 0, radius: 560, seed1: 0, seed2: 2.2, artVariant };
+      buildIslandBuffer(island); return island;
+    });
+    return { layout: render(islands, 1200, 1200, 0.053, 600, 600),
+      gallery: render(gallery, 1440, 600, 0.3, 240, 300) };
+  });
+  await writeFile(`${outputDirectory}/island-layout.png`, Buffer.from(artPreviews.layout, 'base64'));
+  await writeFile(`${outputDirectory}/island-families.png`, Buffer.from(artPreviews.gallery, 'base64'));
+  const result = await page.evaluate(() => {
+    const maxCacheSide = Math.max(...islands.map(i => Math.max(i.buffer.width, i.buffer.height)));
+    const cacheBytes = islands.reduce((sum, i) => sum + i.buffer.width * i.buffer.height * 4, 0);
+    const centersPreserved = islands.every(i => {
+      const p = islandBufferWorldPosition(i);
+      return Math.abs(p.x + i.bufferCenterX - i.x) < 1e-6 && Math.abs(p.y + i.bufferCenterY - i.y) < 1e-6;
+    });
+    const islandCount = islands.length;
+    let minimumGap = Infinity, minimumSpawnClearance = Infinity;
+    const layoutFailures = [];
+    for (let seed = 0; seed < 101; seed++) {
+      let state = seed;
+      const random = seed === 100 ? () => 0.5 : () => ((state = (Math.imul(state, 1664525) + 1013904223) >>> 0) / 4294967296);
+      const layout = createIslandLayout(random);
+      const counts = Array.from({ length: NavalArt.variantCount }, (_, variant) => layout.filter(i => i.artVariant === variant).length);
+      if (layout.length !== 15 || counts.some(count => count !== 5)) layoutFailures.push(seed);
+      for (let i = 0; i < layout.length; i++) {
+        minimumSpawnClearance = Math.min(minimumSpawnClearance, Math.hypot(layout[i].x, layout[i].y) - islandPlacementExtent(layout[i]));
+        for (let j = 0; j < i; j++) minimumGap = Math.min(minimumGap,
+          Math.hypot(layout[i].x - layout[j].x, layout[i].y - layout[j].y) - islandPlacementExtent(layout[i]) - islandPlacementExtent(layout[j]));
+      }
+    }
+    const variantChecks = Array.from({ length: NavalArt.variantCount }, (_, variant) => {
+      const detail = window.__verifyIslandDetail(variant);
+      const signature = Array.from({ length: 128 }, (_, i) => outerIslandShorelineRadius(islands[0], i * Math.PI / 64).toFixed(2)).join(',');
+      return { variant, signature, fits: detail.boundsFit && detail.theoreticalBoundsFit && detail.positivePadding && detail.worldCenterPreserved && detail.shorelineMatchesCollision,
+        opaque: detail.opaqueCoastSamples, clear: detail.clearOffshoreSamples };
+    });
+    window.__verifyIslandDetail();
+    const model = document.createElement('canvas').getContext('2d');
+    const mounts = [];
+    for (const nation of Object.keys(NATIONS)) {
+      const ship = new Player(nation);
+      ship.x = 400; ship.y = -300; ship.angle = 0.77;
+      traceShipHull(model, nation, ship.radius);
+      for (let i = 0; i < ship.config.secondary.turrets; i++) {
+        const mount = getSecondaryMount(nation, ship.radius, i);
+        const fits = [-2.75, 2.75].every(dx => [-2.75, 2.75].every(dy => model.isPointInPath(mount.x + dx, mount.y + dy)));
+        projectiles = [];
+        ship.fireSec(i, { x: 900, y: -100 });
+        const expectedX = ship.x + Math.cos(ship.angle) * mount.x - Math.sin(ship.angle) * mount.y;
+        const expectedY = ship.y + Math.sin(ship.angle) * mount.x + Math.cos(ship.angle) * mount.y;
+        const shot = projectiles[0];
+        const shotAligned = Math.hypot(shot.x - expectedX, shot.y - expectedY) < 1e-6;
+        mounts.push({ nation, index: i, fits, shotAligned });
+      }
+    }
+    projectiles = [];
+    const testShip = { x: 0, y: 0, angle: 0, radius: 50, vx: 3, vy: 0 };
+    for (let i = 0; i < 200; i++) { testShip.x += 6; NavalArt.recordWake(testShip, 16.67); }
+    const movingWake = NavalArt.wakeCount(testShip);
+    testShip.vx = 0;
+    for (let i = 0; i < 300; i++) NavalArt.recordWake(testShip, 16.67);
+    const stoppedWake = NavalArt.wakeCount(testShip);
+    const terrain = islands[0].buffer.getContext('2d');
+    const colors = new Set();
+    const cx = Math.round(islands[0].bufferCenterX), cy = Math.round(islands[0].bufferCenterY);
+    const sample = terrain.getImageData(cx - 80, cy - 80, 160, 160).data;
+    for (let i = 0; i < sample.length; i += 64) colors.add(`${sample[i]},${sample[i + 1]},${sample[i + 2]}`);
+    keys.ArrowUp = true;
+    for (let i = 0; i < 210; i++) {
+      player.update(TIME_STEP);
+      particles = particles.filter(p => p.update(TIME_STEP));
+    }
+    keys.ArrowUp = false;
+    islands[0].x = 80; islands[0].y = player.y; zoom = 0.5;
+    return { ready: NavalArt.stats.ready, islandCount, maxCacheSide, cacheBytes, centersPreserved,
+      movingWake, stoppedWake, terrainColors: colors.size, mounts, minimumGap, minimumSpawnClearance, layoutFailures,
+      distinctSilhouettes: new Set(variantChecks.map(v => v.signature)).size,
+      variantChecks: variantChecks.map(({ signature, ...check }) => check) };
+  });
+  if (!result.ready || result.islandCount !== 15 || result.maxCacheSide > 1536 ||
+      result.cacheBytes > 15 * 1536 * 1536 * 4 || !result.centersPreserved ||
+      result.movingWake < 1 || result.movingWake > 100 || result.stoppedWake !== 0 ||
+      result.terrainColors < 100 || result.mounts.some(m => !m.fits || !m.shotAligned) ||
+      result.minimumGap < 450 - 1e-6 || result.minimumSpawnClearance < 700 - 1e-6 || result.layoutFailures.length ||
+      result.distinctSilhouettes !== 3 || result.variantChecks.some(v => !v.fits || v.opaque !== 128 || v.clear !== 128) || errors.length) {
+    throw new Error(`Painted graphics verification failed: ${JSON.stringify({ result, errors })}`);
+  }
+  await page.waitForTimeout(100);
+  const png = await page.locator('#gameCanvas').evaluate(c => c.toDataURL().split(',')[1]);
+  await writeFile(`${outputDirectory}/painted-naval-art.png`, Buffer.from(png, 'base64'));
+  console.log(`PAINTED GRAPHICS: ${JSON.stringify(result)}`);
+  await page.close();
+
+  const missing = await browser.newPage();
+  await missing.route('**/assets/art/ship-deck.png', route => route.abort());
+  await missing.goto(baseUrl);
+  await missing.getByRole('button', { name: 'Click to Engage', exact: true }).click();
+  await missing.getByText('Artwork unavailable. Reload to retry.', { exact: true }).waitFor();
+  if (!(await missing.evaluate(() => NavalArt.stats.failed && gameState === 'SPLASH'))) {
+    throw new Error('Missing art must prevent starting an incomplete game.');
+  }
+  await missing.close();
+  for (const path of ['/package.json', '/RULES.md', '/assets/art/missing.png']) {
+    if ((await browser.newPage().then(async page => { const response = await page.request.get(`${baseUrl}${path}`); await page.close(); return response.status(); })) !== 404) {
+      throw new Error(`Verifier server must reject unlisted path ${path}.`);
+    }
+  }
+}
+
+async function verifyRenderCaches(browser) {
+  const page=await browser.newPage({viewport:{width:1440,height:900}});
+  const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  await page.goto(`${baseUrl}/?profile-render`);await page.waitForFunction(()=>!!window.RenderProfile);
+  await page.getByRole('button',{name:'Click to Engage',exact:true}).click();
+  await page.getByRole('button',{name:'Skirmish',exact:true}).click();
+  await page.getByRole('button',{name:/US NAVY/}).click();
+  const result=await page.evaluate(()=>{
+    gameState='PAUSED';
+    const create=()=>{const c=document.createElement('canvas');c.width=320;c.height=180;return c.getContext('2d');};
+    const cached=create(),reference=create(),water=[];
+    for(const z of [.1,.45,2]){
+      const x=-1531,y=2287,w=320/z,h=180/z,time=12345;
+      for(const c of [cached,reference])c.setTransform(z,0,0,z,-x*z,-y*z);
+      const before=cached.getTransform();NavalArt.ocean(cached,x,y,w,h,time);
+      const after=cached.getTransform();
+      const size=z<.2?128:z<.4?256:z<.8?512:1024;
+      const source=document.createElement('canvas');source.width=size;source.height=size;
+      const sourceContext=source.getContext('2d');sourceContext.imageSmoothingQuality='high';sourceContext.drawImage(RenderProfile.referenceWater,0,0,size,size);
+      reference.save();reference.fillStyle='#123f4c';reference.fillRect(x,y,w,h);
+      const pattern=reference.createPattern(source,'repeat');pattern.setTransform(new DOMMatrix().scale(1024/size));
+      reference.fillStyle=pattern;reference.fillRect(x,y,w,h);
+      reference.globalAlpha=.07;reference.translate(Math.sin(time/7000)*12,Math.cos(time/9000)*12);reference.fillRect(x-16,y-16,w+32,h+32);
+      reference.globalAlpha=.2;reference.fillStyle='#123b46';reference.fillRect(x-16,y-16,w+32,h+32);reference.restore();
+      const a=cached.getImageData(0,0,320,180).data,b=reference.getImageData(0,0,320,180).data;
+      let delta=0,maximum=0;for(let i=0;i<a.length;i++){delta+=Math.abs(a[i]-b[i]);maximum=Math.max(maximum,Math.abs(a[i]-b[i]));}
+      water.push({zoom:z,meanChannelDelta:delta/a.length,maxChannelDelta:maximum,transformPreserved:before.toString()===after.toString()});
+    }
+    const creates=NavalArt.stats.waterPatternCreates;
+    for(let i=0;i<100;i++)NavalArt.ocean(cached,-1531,2287,320/.45,180/.45,i*1000);
+    const patternReused=NavalArt.stats.waterPatternCreates===creates;
+    const entity={x:0,y:0,angle:.77,radius:50,vx:3,vy:2};
+    for(let i=0;i<100;i++){entity.x+=Math.cos(entity.angle)*6;entity.y+=Math.sin(entity.angle)*6;NavalArt.recordWake(entity,16.6);}
+    const context=create();context.setTransform(.1,0,0,.1,160,90);
+    const before=NavalArt.stats.wakeDraws||0;
+    NavalArt.wake(context,entity,{left:-1600,right:1600,top:-900,bottom:900,zoom:.1});
+    const wideDraws=(NavalArt.stats.wakeDraws||0)-before;
+    const historyPreserved=NavalArt.wakeCount(entity)===100;
+    const visible=context.getImageData(0,0,320,180).data.some((v,i)=>i%4===3&&v>0);
+    const normalStart=NavalArt.stats.wakeDraws||0;
+    NavalArt.wake(context,entity,{left:-1600,right:1600,top:-900,bottom:900,zoom:.45});
+    const normalDraws=(NavalArt.stats.wakeDraws||0)-normalStart;
+    const outsideStart=NavalArt.stats.wakeDraws||0;
+    NavalArt.wake(context,entity,{left:1e6,right:1e6+100,top:1e6,bottom:1e6+100,zoom:.1});
+    const offscreenDraws=(NavalArt.stats.wakeDraws||0)-outsideStart;
+    entity.vx=0;entity.vy=0;NavalArt.recordWake(entity,5000);
+    const expires=NavalArt.wakeCount(entity)===0;
+    const cache=NavalArt.renderCacheInfo();
+    const fixtures=[1,5].flatMap(w=>[.45,.1].map(z=>RenderProfile.fixture(w,true,z)));
+    RenderProfile.mode('full');renderGameFrame(12345);
+    return {water,patternReused,wideDraws,normalDraws,offscreenDraws,historyPreserved,visible,expires,cache,
+      fixtureCounts:fixtures.map(f=>f.enemyCount),phases:Object.keys(RenderProfile.samples().at(-1))};
+  });
+  if(result.water.some(w=>w.meanChannelDelta>2||!w.transformPreserved)||!result.patternReused||
+      result.wideDraws<1||result.wideDraws>180||result.normalDraws!==297||result.offscreenDraws!==0||!result.historyPreserved||!result.visible||!result.expires||
+      result.cache.wakeSprites!==1||result.cache.wakeBytes!==96*96*4||JSON.stringify(result.fixtureCounts)!==JSON.stringify([5,5,20,20])||errors.length)throw new Error(`Render cache verification failed: ${JSON.stringify({result,errors})}`);
+  await page.close();
+  const normal=await browser.newPage();await normal.goto(baseUrl);
+  if(await normal.evaluate(()=>!!window.RenderProfile||!!window.__profileWaterSource))throw new Error('Normal gameplay must not load render diagnostic.');
+  await normal.close();console.log(`RENDER CACHES: ${JSON.stringify(result)}`);
+}
+
+async function verifyShellTracers(browser) {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.goto(baseUrl);
+  await page.getByRole('button', { name: 'Click to Engage', exact: true }).click();
+  await page.getByRole('button', { name: 'Skirmish', exact: true }).click();
+  await page.getByRole('button', { name: /US NAVY/ }).click();
+  const result = await page.evaluate(() => {
+    gameState = 'PAUSED'; enemies = []; player.x = -10000; player.y = -10000;
+    const surface = document.createElement('canvas'); surface.width = 400; surface.height = 400;
+    const context = surface.getContext('2d');
+    const cases = [];
+    for (const [friendly, size, speed] of [[true,13,11], [true,5,15], [false,8,8]]) {
+      for (const angle of [0, Math.PI/2, Math.PI, -Math.PI/4]) {
+        const p = new Projectile(200,200,angle,friendly,speed,77,'#fff',size);
+        const initialLength = NavalArt.shellTrailGeometry(p).length;
+        for (let step = 0; step < 20; step++) p.update(16.6);
+        const distance = Math.hypot(p.x-200,p.y-200), trail = NavalArt.shellTrailGeometry(p);
+        // Draw around a fixed canvas center without changing traveled distance.
+        context.clearRect(0,0,400,400); context.save(); context.translate(200-p.x,200-p.y); NavalArt.shell(context,p); context.restore();
+        const alpha = offset => context.getImageData(Math.round(200+Math.cos(angle)*offset),Math.round(200+Math.sin(angle)*offset),1,1).data[3];
+        cases.push({ friendly,size,angle, initialLength, bounded: trail.length <= distance && trail.length <= 170,
+          aligned: Math.abs(trail.angle-angle) < 1e-9, visibleBehind: alpha(-trail.length*.4)>0,
+          clearAhead: alpha(40)===0, movementPreserved: Math.abs(distance-speed*20)<1e-6,
+          damagePreserved: p.damage===77 && Math.abs(p.life-(8000-20*16.6))<1e-8 });
+      }
+    }
+    const target = { x: 110, y: 0, radius: 20, health: 100 };
+    enemies = [target]; const friendly = new Projectile(100,0,0,true,11,25,'#fff',13); friendly.update(16.6);
+    const friendlyHit = target.health === 75 && friendly.life === 0;
+    enemies = []; player.x = 110; player.y = 0; player.health = 100;
+    const hostile = new Projectile(100,0,0,false,8,17,'#f00',8); hostile.update(16.6);
+    const hostileHit = player.health === 83 && hostile.life === 0;
+    context.clearRect(0,0,400,400); NavalArt.shell(context,friendly); NavalArt.shell(context,hostile);
+    const deadInvisible = context.getImageData(0,0,400,400).data.every(v => v === 0);
+    player.x = -10000; player.y = -10000;
+    const expired = new Projectile(0,0,0,true,11,25,'#fff',13); expired.update(8001);
+    NavalArt.shell(context,expired);
+    const expiredInvisible = expired.life < 0 && context.getImageData(0,0,400,400).data.every(v => v === 0);
+    player.x = 0; player.y = 200; player.angle = -.5; player.turretAngle = -.5; player.health = player.maxHealth;
+    islands = [islands[0]]; islands[0].x = 600; islands[0].y = -550; islands[0].radius = 500; buildIslandBuffer(islands[0]);
+    projectiles = [];
+    const add = (x,y,angle,isFriendly,speed,size,distance) => {
+      const p = new Projectile(x,y,angle,isFriendly,speed,77,'#ef4444',size);
+      p.x += Math.cos(angle)*distance; p.y += Math.sin(angle)*distance; projectiles.push(p);
+    };
+    for (let i=0;i<3;i++) add(45,180+i*14,-.5+i*.035,true,11,13,390+i*25);
+    for (let i=0;i<2;i++) add(0,220+i*12,-.12,true,15,5,480+i*35);
+    add(900,-100,Math.PI-.4,false,8,8,330); zoom = .7;
+    window.__tracerDraw = Projectile.prototype.draw;
+    return { cases, friendlyHit, hostileHit, deadInvisible, expiredInvisible, cacheCount: NavalArt.shellCacheCount() };
+  });
+  if (result.cases.some(c => c.initialLength !== 0 || !c.bounded || !c.aligned || !c.visibleBehind || !c.clearAhead || !c.movementPreserved || !c.damagePreserved) ||
+      !result.friendlyHit || !result.hostileHit || !result.deadInvisible || !result.expiredInvisible || result.cacheCount !== 3 || errors.length) {
+    throw new Error(`Shell tracer verification failed: ${JSON.stringify({ result, errors })}`);
+  }
+  await page.waitForTimeout(100);
+  await page.screenshot({ path: `${outputDirectory}/shell-tracers.png` });
+  await page.evaluate(() => { Projectile.prototype.draw = function() { ctx.fillStyle=this.color;ctx.beginPath();ctx.arc(this.x,this.y,this.size,0,Math.PI*2);ctx.fill(); }; });
+  await page.waitForTimeout(100);
+  await page.screenshot({ path: `${outputDirectory}/shell-tracers-before.png` });
+  await page.evaluate(() => { Projectile.prototype.draw = window.__tracerDraw; });
+  console.log(`SHELL TRACERS: ${JSON.stringify(result)}`);
+  await page.close();
+}
+
 async function verifyIslandDetail(browser) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
   page.on("pageerror", (error) => { throw error; });
@@ -385,11 +660,11 @@ async function verifyIslandDetail(browser) {
   const result = await page.evaluate(() => window.__verifyIslandDetail?.());
   if (
     !result ||
-    result.layerCount < 5 ||
-    result.hillCount < 1 ||
-    result.rockCount < 1 ||
-    result.treeCount < 1 ||
+    !result.paintedTerrain ||
+    result.opaqueCoastSamples !== 128 ||
+    result.clearOffshoreSamples !== 128 ||
     result.shorelineRadius <= 0 ||
+    result.sampledMaximumShorelineRadius > result.maximumShorelineRadius ||
     !result.boundsFit ||
     !result.theoreticalBoundsFit ||
     !result.positivePadding ||
@@ -421,6 +696,215 @@ async function verifyIslandDetail(browser) {
   const canvasPngBase64 = await page.locator("#gameCanvas").evaluate((canvas) => canvas.toDataURL("image/png").split(",")[1]);
   await writeFile(`${outputDirectory}/island-detail.png`, Buffer.from(canvasPngBase64, "base64"));
   await page.close();
+}
+
+async function verifyRendererExperiment(browser) {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.goto(`${baseUrl}/?renderer-lab&profile-render`, { waitUntil: 'networkidle' });
+  await page.getByText('Click to Engage', { exact: true }).click();
+  await page.getByRole('button', { name: 'Skirmish', exact: true }).click();
+  await page.getByRole('button', { name: /US NAVY/ }).click();
+  await page.getByText('BATTLESHIP', { exact: true }).waitFor();
+  await page.evaluate(() => window.RendererExperiment.ready);
+  await page.waitForFunction(() => !!window.RenderProfile);
+  await page.evaluate(() => { RenderProfile.fixture(5, true, 0.45); gameState = 'PAUSED'; });
+  await page.waitForTimeout(150);
+  await page.screenshot({ path: `${outputDirectory}/renderer-canvas-gameplay.png`, fullPage: true });
+  const before = await page.evaluate(() => ({ x: player.x, y: player.y, wave, loop: animationLoopStarts }));
+  await page.evaluate(() => window.RendererExperiment.switchTo('PixiJS/WebGL'));
+  await page.waitForFunction(() => window.RendererExperiment.diagnostics().renderer === 'PixiJS/WebGL' &&
+    document.querySelector('#gameCanvas').style.visibility === 'hidden');
+  await page.waitForTimeout(300);
+  const pixi = await page.evaluate(() => ({ ...window.RendererExperiment.diagnostics(),
+    webgl: !!(document.querySelector('.pixi-renderer-canvas')?.getContext('webgl2') || document.querySelector('.pixi-renderer-canvas')?.getContext('webgl')),
+    world: { x: player.x, y: player.y, wave, loop: animationLoopStarts },
+    canvasVisible: getComputedStyle(document.querySelector('#gameCanvas')).visibility }));
+  if (!pixi.webgl || !pixi.visibleIslands || !pixi.visibleShips || pixi.canvasVisible !== 'hidden' ||
+      pixi.world.wave !== before.wave || pixi.world.loop !== before.loop) {
+    throw new Error(`Pixi renderer activation/parity failed: ${JSON.stringify({ before, pixi })}`);
+  }
+  await page.screenshot({ path: `${outputDirectory}/renderer-pixi-gameplay.png`, fullPage: true });
+  await page.setViewportSize({ width: 1100, height: 700 });
+  await page.waitForFunction(() => document.querySelector('.pixi-renderer-canvas')?.width === 1100);
+  const resized = await page.evaluate(() => ({ x: player.x, y: player.y, wave, width: document.querySelector('.pixi-renderer-canvas').width }));
+  if (resized.width !== 1100 || resized.x !== pixi.world.x || resized.y !== pixi.world.y || resized.wave !== before.wave) {
+    throw new Error(`Pixi resize changed the simulation or missed the viewport: ${JSON.stringify(resized)}`);
+  }
+  const input = await page.evaluate(() => {
+    gameState = 'PLAYING'; player.waypoint = null;
+    document.querySelector('.pixi-renderer-canvas').dispatchEvent(new MouseEvent('mousedown',
+      { bubbles: true, clientX: 400, clientY: 350, button: 2 }));
+    gameState = 'PAUSED';
+    return { waypoint: player.waypoint, expectedX: (400 - innerWidth / 2) / zoom + player.x,
+      expectedY: (350 - innerHeight / 2) / zoom + player.y };
+  });
+  if (!input.waypoint || Math.abs(input.waypoint.x - input.expectedX) > 1e-8 ||
+      Math.abs(input.waypoint.y - input.expectedY) > 1e-8) throw new Error(`Pixi input target changed waypoint mapping: ${JSON.stringify(input)}`);
+  await page.evaluate(() => window.RendererExperiment.restart());
+  await page.waitForFunction(() => window.RendererExperiment.diagnostics().renderer === 'PixiJS/WebGL' &&
+    document.querySelectorAll('.pixi-renderer-canvas').length === 1);
+  await page.evaluate(() => window.RendererExperiment.forceContextLoss());
+  await page.waitForFunction(() => window.RendererExperiment.diagnostics().contextLossFallbacks > 0, { timeout: 5000 });
+  if ((await page.evaluate(() => window.RendererExperiment.diagnostics())).contextLossFallbacks < 1) {
+    throw new Error('Canvas fallback was not shown after WebGL context loss.');
+  }
+  await page.evaluate(() => { if (window.RendererExperiment.diagnostics().contextLost) window.RendererExperiment.forceContextRestore(); });
+  await page.waitForFunction(() => window.RendererExperiment.diagnostics().contextLost === false &&
+    window.RendererExperiment.diagnostics().renderer === 'PixiJS/WebGL', { timeout: 10000 });
+  const restored = await page.evaluate(() => {
+    const pixiCanvas = document.querySelector('.pixi-renderer-canvas');
+    const pixiStyle = pixiCanvas && getComputedStyle(pixiCanvas);
+    return { ...window.RendererExperiment.diagnostics(), pixiCanvasExists: !!pixiCanvas,
+      pixiDisplay: pixiStyle?.display, pixiVisibility: pixiStyle?.visibility,
+      canvas2dVisibility: getComputedStyle(document.querySelector('#gameCanvas')).visibility };
+  });
+  if (restored.contextLost !== false || restored.renderer !== 'PixiJS/WebGL' ||
+      restored.canvas2dVisibility !== 'hidden' || !restored.pixiCanvasExists ||
+      restored.pixiDisplay === 'none' || restored.pixiVisibility === 'hidden') {
+    throw new Error(`Pixi canvas did not become renderable after context restoration: ${JSON.stringify(restored)}`);
+  }
+  const inputAfterRestore = await page.evaluate(() => {
+    gameState = 'PLAYING'; player.waypoint = null;
+    document.querySelector('.pixi-renderer-canvas').dispatchEvent(new MouseEvent('mousedown',
+      { bubbles: true, clientX: 430, clientY: 330, button: 2 }));
+    gameState = 'PAUSED';
+    return { waypoint: player.waypoint, expectedX: (430 - innerWidth / 2) / zoom + player.x,
+      expectedY: (330 - innerHeight / 2) / zoom + player.y };
+  });
+  if (!inputAfterRestore.waypoint || Math.abs(inputAfterRestore.waypoint.x - inputAfterRestore.expectedX) > 1e-8 ||
+      Math.abs(inputAfterRestore.waypoint.y - inputAfterRestore.expectedY) > 1e-8) {
+    throw new Error(`Pixi input target was not restored after context recovery: ${JSON.stringify(inputAfterRestore)}`);
+  }
+  const fallbackCountBeforeExplicitCanvas = (await page.evaluate(() => window.RendererExperiment.diagnostics())).contextLossFallbacks;
+  await page.evaluate(() => window.RendererExperiment.forceContextLoss());
+  await page.waitForFunction(() => document.querySelector('.pixi-renderer-canvas')
+    ?.getContext('webgl2')?.isContextLost(), { timeout: 5000 });
+  const raceLost = await page.evaluate(() => {
+    const pixiCanvas = document.querySelector('.pixi-renderer-canvas');
+    const nativeEventHandled = window.RendererExperiment.diagnostics().contextLost;
+    if (!nativeEventHandled) pixiCanvas.dispatchEvent(new Event('webglcontextlost', { cancelable: true }));
+    return { ...window.RendererExperiment.diagnostics(), nativeEventHandled,
+      canvas2dVisibility: getComputedStyle(document.querySelector('#gameCanvas')).visibility,
+      pixiDisplay: getComputedStyle(pixiCanvas).display };
+  });
+  if (raceLost.contextLost !== true || raceLost.renderer !== 'Canvas2D' ||
+      raceLost.contextLossFallbacks <= fallbackCountBeforeExplicitCanvas ||
+      raceLost.canvas2dVisibility !== 'visible' || raceLost.pixiDisplay !== 'none') {
+    throw new Error(`Pixi loss did not establish the expected temporary Canvas2D fallback: ${JSON.stringify(raceLost)}`);
+  }
+  await page.evaluate(() => window.RendererExperiment.switchTo('Canvas2D'));
+  await page.evaluate(() => window.RendererExperiment.forceContextRestore());
+  await page.waitForFunction(() => !document.querySelector('.pixi-renderer-canvas')
+    ?.getContext('webgl2')?.isContextLost(), { timeout: 10000 });
+  await page.waitForTimeout(100);
+  const explicitCanvasRestored = await page.evaluate(() => {
+    const pixiCanvas = document.querySelector('.pixi-renderer-canvas');
+    const nativeEventHandled = !window.RendererExperiment.diagnostics().contextLost;
+    if (!nativeEventHandled) pixiCanvas.dispatchEvent(new Event('webglcontextrestored'));
+    return { ...window.RendererExperiment.diagnostics(), nativeEventHandled,
+      canvas2dVisibility: getComputedStyle(document.querySelector('#gameCanvas')).visibility,
+      pixiDisplay: getComputedStyle(pixiCanvas).display };
+  });
+  if (explicitCanvasRestored.contextLost !== false || explicitCanvasRestored.renderer !== 'Canvas2D' ||
+      explicitCanvasRestored.canvas2dVisibility !== 'visible' || explicitCanvasRestored.pixiDisplay !== 'none') {
+    throw new Error(`WebGL restore overrode the explicit Canvas2D choice: ${JSON.stringify(explicitCanvasRestored)}`);
+  }
+  const explicitCanvasInput = await page.evaluate(() => {
+    gameState = 'PLAYING'; player.waypoint = null;
+    document.querySelector('#gameCanvas').dispatchEvent(new MouseEvent('mousedown',
+      { bubbles: true, clientX: 440, clientY: 325, button: 2 }));
+    gameState = 'PAUSED';
+    return { waypoint: player.waypoint, expectedX: (440 - innerWidth / 2) / zoom + player.x,
+      expectedY: (325 - innerHeight / 2) / zoom + player.y };
+  });
+  if (!explicitCanvasInput.waypoint || Math.abs(explicitCanvasInput.waypoint.x - explicitCanvasInput.expectedX) > 1e-8 ||
+      Math.abs(explicitCanvasInput.waypoint.y - explicitCanvasInput.expectedY) > 1e-8) {
+    throw new Error(`Canvas2D input target was not retained after explicit selection during recovery: ${JSON.stringify(explicitCanvasInput)}`);
+  }
+  await page.evaluate(() => window.RendererExperiment.switchTo('Canvas2D'));
+  const canvas2dRestored = await page.evaluate(() => ({
+    renderer: window.RendererExperiment.diagnostics().renderer,
+    canvas2dVisibility: getComputedStyle(document.querySelector('#gameCanvas')).visibility,
+    pixiDisplay: getComputedStyle(document.querySelector('.pixi-renderer-canvas')).display
+  }));
+  if (canvas2dRestored.renderer !== 'Canvas2D' || canvas2dRestored.canvas2dVisibility !== 'visible' ||
+      canvas2dRestored.pixiDisplay !== 'none') {
+    throw new Error(`Canvas2D was not restored after switching renderer: ${JSON.stringify(canvas2dRestored)}`);
+  }
+  // Force the real context while its canvas is hidden. Headless Chromium can
+  // omit its native DOM notifications in this state, so synthesize only events
+  // it did not deliver. The active-Pixi case above also covers native recovery.
+  await page.evaluate(() => window.RendererExperiment.forceContextLoss());
+  await page.waitForFunction(() => document.querySelector('.pixi-renderer-canvas')
+    ?.getContext('webgl2')?.isContextLost(), { timeout: 5000 });
+  const inactiveLost = await page.evaluate(() => {
+    const pixiCanvas = document.querySelector('.pixi-renderer-canvas');
+    const nativeEventHandled = window.RendererExperiment.diagnostics().contextLost;
+    if (!nativeEventHandled) pixiCanvas.dispatchEvent(new Event('webglcontextlost', { cancelable: true }));
+    return { ...window.RendererExperiment.diagnostics(),
+      nativeEventHandled,
+      canvas2dVisibility: getComputedStyle(document.querySelector('#gameCanvas')).visibility,
+      pixiDisplay: getComputedStyle(pixiCanvas).display };
+  });
+  if (inactiveLost.renderer !== 'Canvas2D' || inactiveLost.contextLost !== true ||
+      inactiveLost.canvas2dVisibility !== 'visible' || inactiveLost.pixiDisplay !== 'none') {
+    throw new Error(`Inactive Pixi context loss disturbed Canvas2D: ${JSON.stringify(inactiveLost)}`);
+  }
+  await page.evaluate(() => window.RendererExperiment.forceContextRestore());
+  await page.waitForFunction(() => !document.querySelector('.pixi-renderer-canvas')
+    ?.getContext('webgl2')?.isContextLost(), { timeout: 10000 });
+  await page.waitForTimeout(100);
+  const inactiveRestored = await page.evaluate(() => {
+    const pixiCanvas = document.querySelector('.pixi-renderer-canvas');
+    const nativeEventHandled = !window.RendererExperiment.diagnostics().contextLost;
+    if (!nativeEventHandled) pixiCanvas.dispatchEvent(new Event('webglcontextrestored'));
+    return { ...window.RendererExperiment.diagnostics(),
+      nativeEventHandled,
+      canvas2dVisibility: getComputedStyle(document.querySelector('#gameCanvas')).visibility,
+      pixiDisplay: getComputedStyle(pixiCanvas).display };
+  });
+  if (inactiveRestored.renderer !== 'Canvas2D' || inactiveRestored.contextLost !== false ||
+      inactiveRestored.canvas2dVisibility !== 'visible' || inactiveRestored.pixiDisplay !== 'none') {
+    throw new Error(`Inactive Pixi context restore changed the selected renderer: ${JSON.stringify(inactiveRestored)}`);
+  }
+  const canvasInputAfterRestore = await page.evaluate(() => {
+    gameState = 'PLAYING'; player.waypoint = null;
+    document.querySelector('#gameCanvas').dispatchEvent(new MouseEvent('mousedown',
+      { bubbles: true, clientX: 450, clientY: 320, button: 2 }));
+    gameState = 'PAUSED';
+    return { waypoint: player.waypoint, expectedX: (450 - innerWidth / 2) / zoom + player.x,
+      expectedY: (320 - innerHeight / 2) / zoom + player.y };
+  });
+  if (!canvasInputAfterRestore.waypoint ||
+      Math.abs(canvasInputAfterRestore.waypoint.x - canvasInputAfterRestore.expectedX) > 1e-8 ||
+      Math.abs(canvasInputAfterRestore.waypoint.y - canvasInputAfterRestore.expectedY) > 1e-8) {
+    throw new Error(`Canvas2D input target changed after inactive Pixi recovery: ${JSON.stringify(canvasInputAfterRestore)}`);
+  }
+  await page.evaluate(() => window.RendererExperiment.switchTo('PixiJS/WebGL'));
+  await page.evaluate(() => window.RendererExperiment.dispose());
+  if (await page.locator('.pixi-renderer-canvas').count()) throw new Error('Pixi canvas remained after renderer disposal.');
+  if (errors.length) throw new Error(`Pixi renderer browser errors: ${errors.join('; ')}`);
+  console.log(`PIXI RENDERER LIFECYCLE: ${JSON.stringify({ before, pixi, resized, input, restored, inputAfterRestore, raceLost, explicitCanvasRestored, explicitCanvasInput, canvas2dRestored, inactiveLost, inactiveRestored, canvasInputAfterRestore, switched: true, disposed: true })}`);
+  await page.close();
+
+  const missing = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  await missing.route('**/assets/generated/pixi-renderer.js', route => route.abort());
+  await missing.goto(`${baseUrl}/?renderer-lab`, { waitUntil: 'networkidle' });
+  await missing.getByText('Click to Engage', { exact: true }).click();
+  await missing.getByRole('button', { name: 'Skirmish', exact: true }).click();
+  await missing.getByRole('button', { name: /US NAVY/ }).click();
+  await missing.getByText('BATTLESHIP', { exact: true }).waitFor();
+  const fallback = await missing.evaluate(async () => {
+    try { await window.RendererExperiment.switchTo('PixiJS/WebGL'); } catch (error) { return { error: error.message,
+      renderer: window.RendererExperiment.diagnostics().renderer, canvas: getComputedStyle(document.querySelector('#gameCanvas')).visibility }; }
+    return null;
+  });
+  if (!fallback?.error.includes('bundle is missing') || fallback.renderer !== 'Canvas2D' || fallback.canvas !== 'visible') {
+    throw new Error(`Missing Pixi bundle did not safely retain Canvas2D: ${JSON.stringify(fallback)}`);
+  }
+  await missing.close();
 }
 
 async function verifyEnemyOrbit(browser) {
@@ -585,6 +1069,10 @@ try {
     await verifyDefeat(browser);
     await verifyIslandCollision(browser);
     await verifyIslandDetail(browser);
+    await verifyRendererExperiment(browser);
+    await verifyPaintedArt(browser);
+    await verifyShellTracers(browser);
+    await verifyRenderCaches(browser);
     await verifyEnemyOrbit(browser);
     await verifySecondaryArcs(browser);
     await verifyAnimationLoop(browser);

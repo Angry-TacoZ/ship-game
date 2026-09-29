@@ -72,3 +72,55 @@ Original prompt: Recover the playable browser naval game and continue its develo
 - Replaced the fixed `radius * 2.5` backing canvas with bounds derived from the `1.30 * radius` theoretical outer shoreline, maximum layer stroke, `(20, 28)` terrain shadow, tree/hill/rock extents, and 12px per-edge safety padding.
 - Stored per-island buffer centers and draw buffers at `island position - buffer center`, preserving the world-space shoreline center.
 - Extended `?verify-island-detail` to assert sampled and theoretical render bounds, positive edge padding, world-center placement, and the shared rendered/collision shoreline formula for the required radius-500 seeded fixture.
+
+## Natural island forms and surface texture
+
+- Diagnosed the island as overly concentric: each elevation reused the same 5/7-frequency radial noise, trees were spread evenly, and hills were ellipses.
+- Replaced the repeated star-shaped coast with lower-amplitude multi-frequency noise in the shared rendered/collision shoreline function; collision-clearance calculations are unchanged and the 1.30× render bound remains conservative.
+- Varied and nested interior elevation contours; softened layer outlines, clustered tree groves without consuming additional game randomness, added deterministic beach grain, and reshaped hills.
+- Extended the deterministic island fixture to require nested/divergent interior contours and at least 40 generated shoreline marks.
+- `npm.cmd run verify`, `node --check scripts/verify-project.mjs`, and `git diff --check` pass. The fixture reports nested contours, coastline agreement, world-center preservation, 150 shore marks, and positive calculated buffer padding; sampled shoreline max (602.67px) stays below the 650px render bound.
+- Inspected the deterministic detail screenshot and an interactive gameplay screenshot showing two naturally generated islands at the viewport edges; no buffer clipping or runtime errors observed.
+
+## Natural palette, foliage silhouettes, and 2D depth
+
+- Replaced orange/yellow and saturated green elevation bands with sand, olive, and moss tones; softened contour contrast while retaining elevation gradients.
+- Replaced circular tree crowns and circular highlights with deterministic uneven foliage lobes, directional shading, and clipped branch texture. Shared tree colors now also drive the seeded visual fixture.
+- Added small cast shadows below vegetation ledges and offset tree shadows toward the lower right to suggest height in the top-down 2D view. Crown extents remain inside the existing conservative tree buffer bounds.
+- Scope is rendering only: shoreline geometry, island centers, collision clearance, AI, waves, controls, and weapons are unchanged by this follow-up.
+- Full verifier, verifier syntax check, and diff whitespace check passed. Inspected the seeded island before/after and a gameplay coast screenshot; the Playwright client produced no error log. Bounds retain 12px minimum theoretical safety padding and shoreline/collision agreement.
+
+## Painted naval art prototype
+
+- James approved a fresh painted art direction covering rocky islands, textured teal water, detailed decks, and foam wakes. This replaces the earlier concentric terrain renderer rather than extending its colored shelves.
+- Added local generated PNGs and a cached Canvas renderer. Island coast profiles are sampled from the painted alpha silhouette, normalized below the existing conservative render extent, and shared by rendering/collision. World centers and ship-clearance calculations remain unchanged.
+- Added moving water texture, broken coastal foam, cached deck artwork and shaded dynamic turrets for the player/Codex/enemies, and bounded trails that follow movement and expire when ships stop.
+- James flagged secondary mounts outside the narrower deck. Moved them inboard using a shared layout for rendering and projectile origins; damage, reload, range, shell speed, and side targeting retain their existing rules.
+- Bounded island caches to 1536px per axis and culled off-screen islands. A desktop Chromium rendering sample with all 15 islands loaded measured median/p95 frames around 16.7/16.8ms; this is not a mobile hardware benchmark.
+- Updated the verifier's static server to allow only the required HTML, renderer, and PNG assets. New checks cover painted pixel variation, actual coast opacity/offshore transparency, cache budgets/centers, every secondary mount fitting the hull and firing from the same position, stopped-wake expiry, and missing-asset startup recovery guidance.
+- Remaining art limits: one island painting and one base deck illustration, baked sprite lighting, and unmeasured lower-end mobile performance. No merge or deployment is part of this draft.
+- Final full verifier passes, including all 40 secondary mount containment/origin checks, all 128 inner-coast/offshore pixel samples, world centers, cache budgets, and wake expiry. Renderer/verifier syntax and diff whitespace checks pass. Corrected a verifier-only strict floating comparison after reproducing an inward roundoff of 2.84e-14 pixels; collision resolution itself is unchanged.
+
+## Island spacing and distinct terrain families
+
+- James's gameplay screenshot exposed unrestricted overlapping placement and one repeated painted terrain template. Added two original transparent assets via built-in image generation: triangular meadow/woodland lowland and narrow rugged spine. Uniform aspect-preserving normalization retains their distinct silhouettes; each uses its own shared alpha-derived render/collision coast.
+- Added bounded rejection placement with conservative visual extents, a 450px minimum water gap and 700px origin clearance. The 15 islands retain their existing radius range; five of each family appear per layout. A bounded outward fallback handles pathological randomness without overlaps or fewer islands.
+- Verifier covers 100 seeded layouts and a constant random source, all three distinct shoreline signatures, coast opacity/offshore transparency, bounds and centers for each family. Offshore pixel samples now measure distance from the entire polygon rather than assuming a radial offset clears adjacent headlands.
+- Added ignored runtime render artifacts island-families.png and island-layout.png for actual cached terrain review. Existing ship collision-clearance, AI, weapons, progression, and controls are outside this change. Three source families still repeat; lower-end mobile hardware and baked lighting remain review limitations.
+
+## Shells and streaming tracers
+
+- Replaced colored circles with cached shaded shell bodies and tapered luminous trails; player fire uses warm gold and enemy fire ember-red. Secondary tracers are slimmer/shorter. Launch coordinates limit the trail so it never reaches behind the muzzle; dead/expired shells are invisible.
+- Projectile update, damage, collision checks, nation speed multipliers, firing intervals/spread and lifetime remain unchanged. Rendering requires no extra particles or trail history, at most two sprite draws per shot and three shared cache entries.
+- Added twelve angle/style cases, launch-length, trail bounds/alignment, pixel visibility ahead/behind, movement/lifetime preservation, player/enemy damage and expiry checks, plus exact-scene before/after screenshots.
+- Local 1440x900 Chromium comparison with 200 simultaneous projectiles: old median/p95 16.7/16.7ms, new 16.7/16.8ms. This is not lower-end hardware validation and does not resolve the separately reported water/zoom slowdown; that optimization awaits James's direction.
+
+## Focused PR #13 performance investigation
+
+- Reproduced established-wake Wave 5 slowdown against reviewed head 407a096: about 33.3ms median frame pacing / 30 FPS. The earlier light-scene sample did not establish full-load performance.
+- Added loopback-only opt-in render diagnostics and a reproducible 1440x900 matrix: Wave 1/5, .45/.1 zoom, stationary/moving player, seven drawing-only toggles, 180 measured frames after warm-up. Final clean baseline/candidate runs were sequential; seeded island caches are reused to avoid allocation/GC skew. Documented submission/deferred-flush limitations and separate forced-readback probes.
+- Cached water patterns, baked tint, used two screen-space fills and prefiltered sampling levels. Retained original foam art/history/jitter with conservative visibility culling and only subpixel redundancy filtering. Rejected composite/atlas batching (worse pacing) and aggressive decimation (dotted wakes).
+- Current result: wide Wave 5 submission 22.4 -> 20.6ms, but heavy Wave 5 remains around 30 FPS at both zooms. Normal moving p95 stays near 50ms. NOT PRODUCTION-READY for sustained desktop 60 FPS; keep draft/unmerged. Foreground supplementary run showed unexplained scheduling discrepancies and was aborted, not counted as passing.
+- Seeded island cache actual raw pixels 134.57 MiB; retained 1536px cap because max-zoom demand already exceeds it. No island world dimensions, collision coast, spacing, families, gameplay or source PNG changes.
+- Full verifier and four script syntax checks/diff whitespace check pass. Added pattern reuse, blend/anchor, normal/wide/offscreen wake draw/history/expiry and diagnostic-gating regressions. Inspected paired stress screenshots and real physics/AI gameplay at both zooms with 5/20 enemies; no runtime errors. Live wide Wave 5 still misses frames.
+- Detailed evidence and all A/B results: docs/performance-investigation.md. Separate PixiJS vs raw WebGL renderer-boundary proposal: docs/renderer-migration-proposal.md. No dependency installed or migration begun; James must approve that separate direction. Remaining: foreground hardware confirmation and performance gate, independent review, no merge/deploy authorization.
