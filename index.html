@@ -728,12 +728,13 @@ function updateVolume(type, val) {
 }
 
 const ISLAND_LAYERS = [
-    { r: 1.0, color: '#b77b38', light: '#dba95b', shadow: '#75462c', noise: 0.15 },
-    { r: 0.88, color: '#e7cc86', light: '#f7e5ad', shadow: '#b28a50', noise: 0.11 },
-    { r: 0.75, color: '#4f9d57', light: '#79bd6c', shadow: '#2d6b43', noise: 0.1 },
-    { r: 0.58, color: '#347b49', light: '#55a05a', shadow: '#1e513b', noise: 0.08 },
-    { r: 0.4, color: '#24543d', light: '#3e7b4d', shadow: '#15382d', noise: 0.06 }
+    { r: 1.0, color: '#a39473', light: '#bbad8b', shadow: '#756951', noise: 0.15 },
+    { r: 0.88, color: '#c5bc98', light: '#d8cfac', shadow: '#a29775', noise: 0.11 },
+    { r: 0.75, color: '#788661', light: '#949c75', shadow: '#596a50', noise: 0.1 },
+    { r: 0.58, color: '#647759', light: '#82906c', shadow: '#4b604c', noise: 0.08 },
+    { r: 0.4, color: '#566b51', light: '#718361', shadow: '#405444', noise: 0.06 }
 ];
+const ISLAND_TREE_COLORS = ['#435b40', '#506648', '#5c714e'];
 const ISLAND_SHADOW_OFFSET = { x: 20, y: 28 };
 const ISLAND_RENDER_PADDING = 12;
 const ISLAND_MAX_SHORELINE_SCALE = 1.3;
@@ -1253,7 +1254,7 @@ function initIslands() {
                 x: Math.cos(clusterAngle) * clusterRadius + Math.cos(treeAngle) * jitter,
                 y: Math.sin(clusterAngle) * clusterRadius + Math.sin(treeAngle) * jitter,
                 size,
-                color: ['#14532d', '#166534', '#15803d'][Math.floor(Math.random() * 3)]
+                color: ISLAND_TREE_COLORS[Math.floor(Math.random() * ISLAND_TREE_COLORS.length)]
             });
         }
         for (let h = 0; h < 5; h++) {
@@ -1269,6 +1270,20 @@ function initIslands() {
     }
 }
 
+function traceTreeCrown(context, size, phase) {
+    context.beginPath();
+    // Uneven foliage lobes stay within the existing conservative tree bounds.
+    for (let i = 0; i < 32; i++) {
+        const angle = i / 32 * Math.PI * 2;
+        const extent = size * (0.82 + Math.sin(angle * 5 + phase) * 0.1 + Math.cos(angle * 3 - phase) * 0.07);
+        const x = Math.cos(angle) * extent;
+        const y = Math.sin(angle) * extent * 0.9;
+        if (i === 0) context.moveTo(x, y);
+        else context.lineTo(x, y);
+    }
+    context.closePath();
+}
+
 function renderIslandToBuffer(bCtx, isl, radius, centerX, centerY) {
     bCtx.save();
     bCtx.translate(ISLAND_SHADOW_OFFSET.x, ISLAND_SHADOW_OFFSET.y);
@@ -1278,10 +1293,18 @@ function renderIslandToBuffer(bCtx, isl, radius, centerX, centerY) {
     bCtx.restore();
 
     ISLAND_LAYERS.forEach((layer, index) => {
+        if (index >= 2) {
+            bCtx.save();
+            bCtx.translate(5, 8);
+            traceIslandLayer(bCtx, isl, radius, centerX, centerY, layer);
+            bCtx.fillStyle = 'rgba(36, 45, 32, 0.18)';
+            bCtx.fill();
+            bCtx.restore();
+        }
         traceIslandLayer(bCtx, isl, radius, centerX, centerY, layer);
         bCtx.fillStyle = islandLayerGradient(bCtx, centerX, centerY, radius, layer);
         bCtx.fill();
-        bCtx.strokeStyle = index === 0 ? 'rgba(70, 38, 24, 0.85)' : 'rgba(11, 41, 31, 0.58)';
+        bCtx.strokeStyle = index === 0 ? 'rgba(75, 69, 53, 0.6)' : 'rgba(47, 61, 44, 0.25)';
         bCtx.lineWidth = ISLAND_LAYER_STROKE_WIDTHS[index];
         bCtx.stroke();
     });
@@ -1291,7 +1314,7 @@ function renderIslandToBuffer(bCtx, isl, radius, centerX, centerY) {
         bCtx.save();
         bCtx.translate(centerX + mark.x, centerY + mark.y);
         bCtx.rotate(mark.angle);
-        bCtx.fillStyle = mark.light ? 'rgba(255, 239, 190, 0.42)' : 'rgba(135, 91, 47, 0.3)';
+        bCtx.fillStyle = mark.light ? 'rgba(230, 222, 194, 0.35)' : 'rgba(105, 98, 76, 0.24)';
         bCtx.beginPath();
         bCtx.ellipse(0, 0, mark.length, mark.width, 0, 0, Math.PI * 2);
         bCtx.fill();
@@ -1299,8 +1322,8 @@ function renderIslandToBuffer(bCtx, isl, radius, centerX, centerY) {
     });
 
     bCtx.save();
-    bCtx.globalAlpha = 0.48;
-    bCtx.strokeStyle = '#173d32';
+    bCtx.globalAlpha = 0.22;
+    bCtx.strokeStyle = '#405344';
     bCtx.lineWidth = 7;
     [0.49, 0.32].forEach(scale => {
         const contour = { ...ISLAND_LAYERS[ISLAND_LAYERS.length - 1], r: scale, noise: 0.045 };
@@ -1308,7 +1331,7 @@ function renderIslandToBuffer(bCtx, isl, radius, centerX, centerY) {
         bCtx.stroke();
     });
     bCtx.globalAlpha = 0.32;
-    bCtx.strokeStyle = '#b8d77b';
+    bCtx.strokeStyle = '#bbc3a0';
     bCtx.lineWidth = 3;
     const highlight = { ...ISLAND_LAYERS[2], r: 0.78, noise: 0.06 };
     traceIslandLayer(bCtx, isl, radius, centerX, centerY, highlight);
@@ -1319,11 +1342,11 @@ function renderIslandToBuffer(bCtx, isl, radius, centerX, centerY) {
         bCtx.save();
         bCtx.translate(centerX + hill.x + 10, centerY + hill.y + 14);
         bCtx.rotate(hill.angle);
-        bCtx.fillStyle = 'rgba(12, 38, 29, 0.28)';
+        bCtx.fillStyle = 'rgba(38, 52, 39, 0.16)';
         traceHillMass(bCtx, hill.width * 1.08, hill.height * 0.96);
         bCtx.fill();
         bCtx.translate(-16, -22);
-        bCtx.fillStyle = 'rgba(131, 185, 99, 0.2)';
+        bCtx.fillStyle = 'rgba(172, 180, 135, 0.16)';
         traceHillMass(bCtx, hill.width * 0.88, hill.height * 0.78);
         bCtx.fill();
         bCtx.strokeStyle = 'rgba(206, 218, 145, 0.16)';
@@ -1350,10 +1373,35 @@ function renderIslandToBuffer(bCtx, isl, radius, centerX, centerY) {
     });
 
     isl.trees.forEach(tree => {
-        bCtx.fillStyle = 'rgba(0,0,0,0.25)'; bCtx.beginPath(); bCtx.arc(centerX + tree.x + 6, centerY + tree.y + 6, tree.size, 0, Math.PI * 2); bCtx.fill();
-        bCtx.fillStyle = tree.color; bCtx.beginPath(); bCtx.arc(centerX + tree.x, centerY + tree.y, tree.size, 0, Math.PI * 2); bCtx.fill();
-        bCtx.fillStyle = 'rgba(255,255,255,0.2)'; bCtx.beginPath(); bCtx.arc(centerX + tree.x - tree.size*0.3, centerY + tree.y - tree.size*0.3, tree.size*0.42, 0, Math.PI * 2); bCtx.fill();
-        bCtx.fillStyle = 'rgba(5, 35, 27, 0.25)'; bCtx.beginPath(); bCtx.arc(centerX + tree.x + tree.size*0.25, centerY + tree.y + tree.size*0.3, tree.size*0.72, 0, Math.PI * 2); bCtx.fill();
+        const random = islandDetailRandom({ seed1: isl.seed1 + tree.x, seed2: isl.seed2 + tree.y });
+        const phase = random() * Math.PI * 2;
+        bCtx.save();
+        bCtx.translate(centerX + tree.x + 6, centerY + tree.y + 9);
+        traceTreeCrown(bCtx, tree.size, phase);
+        bCtx.fillStyle = 'rgba(23, 34, 26, 0.24)';
+        bCtx.fill();
+        bCtx.restore();
+        bCtx.save();
+        bCtx.translate(centerX + tree.x, centerY + tree.y);
+        traceTreeCrown(bCtx, tree.size, phase);
+        const foliage = bCtx.createLinearGradient(-tree.size, -tree.size, tree.size, tree.size);
+        foliage.addColorStop(0, '#82906a');
+        foliage.addColorStop(0.4, tree.color);
+        foliage.addColorStop(1, '#354b38');
+        bCtx.fillStyle = foliage;
+        bCtx.fill();
+        bCtx.clip();
+        for (let branch = 0; branch < 7; branch++) {
+            const angle = random() * Math.PI * 2;
+            const distance = tree.size * (0.15 + random() * 0.4);
+            bCtx.save();
+            bCtx.translate(Math.cos(angle) * distance, Math.sin(angle) * distance);
+            traceTreeCrown(bCtx, tree.size * (0.22 + random() * 0.12), phase + branch);
+            bCtx.fillStyle = branch % 2 ? 'rgba(163, 173, 123, 0.18)' : 'rgba(28, 49, 33, 0.2)';
+            bCtx.fill();
+            bCtx.restore();
+        }
+        bCtx.restore();
     });
 }
 
@@ -1556,7 +1604,7 @@ function startGame() {
             for (let i = 0; i < 34; i++) {
                 const angle = i * 0.91;
                 const distance = 85 + (i % 7) * 34;
-                fixture.trees.push({ x: Math.cos(angle) * distance, y: Math.sin(angle) * distance, size: 16 + (i % 4) * 4, color: ['#14532d', '#166534', '#15803d'][i % 3] });
+                fixture.trees.push({ x: Math.cos(angle) * distance, y: Math.sin(angle) * distance, size: 16 + (i % 4) * 4, color: ISLAND_TREE_COLORS[i % ISLAND_TREE_COLORS.length] });
             }
             for (let i = 0; i < 7; i++) {
                 const angle = i * 1.37;

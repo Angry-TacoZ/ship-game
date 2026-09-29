@@ -81,3 +81,11 @@ Original prompt: Recover the playable browser naval game and continue its develo
 - Extended the deterministic island fixture to require nested/divergent interior contours and at least 40 generated shoreline marks.
 - `npm.cmd run verify`, `node --check scripts/verify-project.mjs`, and `git diff --check` pass. The fixture reports nested contours, coastline agreement, world-center preservation, 150 shore marks, and positive calculated buffer padding; sampled shoreline max (602.67px) stays below the 650px render bound.
 - Inspected the deterministic detail screenshot and an interactive gameplay screenshot showing two naturally generated islands at the viewport edges; no buffer clipping or runtime errors observed.
+
+## Natural palette, foliage silhouettes, and 2D depth
+
+- Replaced orange/yellow and saturated green elevation bands with sand, olive, and moss tones; softened contour contrast while retaining elevation gradients.
+- Replaced circular tree crowns and circular highlights with deterministic uneven foliage lobes, directional shading, and clipped branch texture. Shared tree colors now also drive the seeded visual fixture.
+- Added small cast shadows below vegetation ledges and offset tree shadows toward the lower right to suggest height in the top-down 2D view. Crown extents remain inside the existing conservative tree buffer bounds.
+- Scope is rendering only: shoreline geometry, island centers, collision clearance, AI, waves, controls, and weapons are unchanged by this follow-up.
+- Full verifier, verifier syntax check, and diff whitespace check passed. Inspected the seeded island before/after and a gameplay coast screenshot; the Playwright client produced no error log. Bounds retain 12px minimum theoretical safety padding and shoreline/collision agreement.
