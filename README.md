@@ -24,7 +24,7 @@ Open http://127.0.0.1:8765 in a browser. Choose **Click to Engage**, **Skirmish*
 
 ## Recovery scope
 
-`index.html` contains the recovered HTML, CSS, game logic, procedural graphics, and procedural Web Audio. No build step or game engine is required. The original Tailwind CDN dependency remains and needs an internet connection for generated UI styling, including classes introduced during play.
+`index.html` contains the HTML, CSS, game logic, and procedural Web Audio. The painted graphics renderer lives in `naval-art.js`, with local images under `assets/art/`. No build step or game engine is required. The original Tailwind CDN dependency remains and needs an internet connection for generated UI styling, including classes introduced during play.
 
 The file was extracted from the running game document. Gemini-injected hosting, authentication, logging, and API bridge scripts were removed. Browser-serialized markup, initial canvas dimensions, and the generated Tailwind style block are retained. This is a recovered standalone snapshot, not the original pre-render HTML file or its editing history.
 

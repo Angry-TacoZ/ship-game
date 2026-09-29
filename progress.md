@@ -89,3 +89,14 @@ Original prompt: Recover the playable browser naval game and continue its develo
 - Added small cast shadows below vegetation ledges and offset tree shadows toward the lower right to suggest height in the top-down 2D view. Crown extents remain inside the existing conservative tree buffer bounds.
 - Scope is rendering only: shoreline geometry, island centers, collision clearance, AI, waves, controls, and weapons are unchanged by this follow-up.
 - Full verifier, verifier syntax check, and diff whitespace check passed. Inspected the seeded island before/after and a gameplay coast screenshot; the Playwright client produced no error log. Bounds retain 12px minimum theoretical safety padding and shoreline/collision agreement.
+
+## Painted naval art prototype
+
+- James approved a fresh painted art direction covering rocky islands, textured teal water, detailed decks, and foam wakes. This replaces the earlier concentric terrain renderer rather than extending its colored shelves.
+- Added local generated PNGs and a cached Canvas renderer. Island coast profiles are sampled from the painted alpha silhouette, normalized below the existing conservative render extent, and shared by rendering/collision. World centers and ship-clearance calculations remain unchanged.
+- Added moving water texture, broken coastal foam, cached deck artwork and shaded dynamic turrets for the player/Codex/enemies, and bounded trails that follow movement and expire when ships stop.
+- James flagged secondary mounts outside the narrower deck. Moved them inboard using a shared layout for rendering and projectile origins; damage, reload, range, shell speed, and side targeting retain their existing rules.
+- Bounded island caches to 1536px per axis and culled off-screen islands. A desktop Chromium rendering sample with all 15 islands loaded measured median/p95 frames around 16.7/16.8ms; this is not a mobile hardware benchmark.
+- Updated the verifier's static server to allow only the required HTML, renderer, and PNG assets. New checks cover painted pixel variation, actual coast opacity/offshore transparency, cache budgets/centers, every secondary mount fitting the hull and firing from the same position, stopped-wake expiry, and missing-asset startup recovery guidance.
+- Remaining art limits: one island painting and one base deck illustration, baked sprite lighting, and unmeasured lower-end mobile performance. No merge or deployment is part of this draft.
+- Final full verifier passes, including all 40 secondary mount containment/origin checks, all 128 inner-coast/offshore pixel samples, world centers, cache budgets, and wake expiry. Renderer/verifier syntax and diff whitespace checks pass. Corrected a verifier-only strict floating comparison after reproducing an inward roundoff of 2.84e-14 pixels; collision resolution itself is unchanged.

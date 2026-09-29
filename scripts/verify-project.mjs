@@ -9,8 +9,20 @@ const outputDirectory = "output/playwright";
 
 const server = createServer(async (_request, response) => {
   try {
-    response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-    response.end(await readFile("index.html"));
+    const pathname = new URL(_request.url, baseUrl).pathname;
+    const files = {
+      '/': ['index.html', 'text/html; charset=utf-8'],
+      '/index.html': ['index.html', 'text/html; charset=utf-8'],
+      '/naval-art.js': ['naval-art.js', 'text/javascript; charset=utf-8'],
+      '/assets/art/ocean.png': ['assets/art/ocean.png', 'image/png'],
+      '/assets/art/island.png': ['assets/art/island.png', 'image/png'],
+      '/assets/art/ship-deck.png': ['assets/art/ship-deck.png', 'image/png']
+    };
+    const file = files[pathname];
+    if (!file) { response.writeHead(404); response.end('Not found'); return; }
+    const bytes = await readFile(file[0]);
+    response.writeHead(200, { 'content-type': file[1] });
+    response.end(bytes);
   } catch (error) {
     response.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
     response.end(error.message);
@@ -374,6 +386,92 @@ async function verifyIslandCollision(browser) {
   await page.close();
 }
 
+async function verifyPaintedArt(browser) {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.goto(`${baseUrl}/?verify-island-detail`);
+  await page.getByRole('button', { name: 'Click to Engage', exact: true }).click();
+  await page.getByRole('button', { name: 'Skirmish', exact: true }).click();
+  await page.getByRole('button', { name: /US NAVY/ }).click();
+  await page.getByText('BATTLESHIP', { exact: true }).waitFor();
+  const result = await page.evaluate(() => {
+    const maxCacheSide = Math.max(...islands.map(i => Math.max(i.buffer.width, i.buffer.height)));
+    const cacheBytes = islands.reduce((sum, i) => sum + i.buffer.width * i.buffer.height * 4, 0);
+    const centersPreserved = islands.every(i => {
+      const p = islandBufferWorldPosition(i);
+      return Math.abs(p.x + i.bufferCenterX - i.x) < 1e-6 && Math.abs(p.y + i.bufferCenterY - i.y) < 1e-6;
+    });
+    const islandCount = islands.length;
+    window.__verifyIslandDetail();
+    const model = document.createElement('canvas').getContext('2d');
+    const mounts = [];
+    for (const nation of Object.keys(NATIONS)) {
+      const ship = new Player(nation);
+      ship.x = 400; ship.y = -300; ship.angle = 0.77;
+      traceShipHull(model, nation, ship.radius);
+      for (let i = 0; i < ship.config.secondary.turrets; i++) {
+        const mount = getSecondaryMount(nation, ship.radius, i);
+        const fits = [-2.75, 2.75].every(dx => [-2.75, 2.75].every(dy => model.isPointInPath(mount.x + dx, mount.y + dy)));
+        projectiles = [];
+        ship.fireSec(i, { x: 900, y: -100 });
+        const expectedX = ship.x + Math.cos(ship.angle) * mount.x - Math.sin(ship.angle) * mount.y;
+        const expectedY = ship.y + Math.sin(ship.angle) * mount.x + Math.cos(ship.angle) * mount.y;
+        const shot = projectiles[0];
+        const shotAligned = Math.hypot(shot.x - expectedX, shot.y - expectedY) < 1e-6;
+        mounts.push({ nation, index: i, fits, shotAligned });
+      }
+    }
+    projectiles = [];
+    const testShip = { x: 0, y: 0, angle: 0, radius: 50, vx: 3, vy: 0 };
+    for (let i = 0; i < 200; i++) { testShip.x += 6; NavalArt.recordWake(testShip, 16.67); }
+    const movingWake = NavalArt.wakeCount(testShip);
+    testShip.vx = 0;
+    for (let i = 0; i < 300; i++) NavalArt.recordWake(testShip, 16.67);
+    const stoppedWake = NavalArt.wakeCount(testShip);
+    const terrain = islands[0].buffer.getContext('2d');
+    const colors = new Set();
+    const cx = Math.round(islands[0].bufferCenterX), cy = Math.round(islands[0].bufferCenterY);
+    const sample = terrain.getImageData(cx - 80, cy - 80, 160, 160).data;
+    for (let i = 0; i < sample.length; i += 64) colors.add(`${sample[i]},${sample[i + 1]},${sample[i + 2]}`);
+    keys.ArrowUp = true;
+    for (let i = 0; i < 210; i++) {
+      player.update(TIME_STEP);
+      particles = particles.filter(p => p.update(TIME_STEP));
+    }
+    keys.ArrowUp = false;
+    islands[0].x = 80; islands[0].y = player.y; zoom = 0.5;
+    return { ready: NavalArt.stats.ready, islandCount, maxCacheSide, cacheBytes, centersPreserved,
+      movingWake, stoppedWake, terrainColors: colors.size, mounts };
+  });
+  if (!result.ready || result.islandCount !== 15 || result.maxCacheSide > 1536 ||
+      result.cacheBytes > 15 * 1536 * 1536 * 4 || !result.centersPreserved ||
+      result.movingWake < 1 || result.movingWake > 100 || result.stoppedWake !== 0 ||
+      result.terrainColors < 100 || result.mounts.some(m => !m.fits || !m.shotAligned) || errors.length) {
+    throw new Error(`Painted graphics verification failed: ${JSON.stringify({ result, errors })}`);
+  }
+  await page.waitForTimeout(100);
+  const png = await page.locator('#gameCanvas').evaluate(c => c.toDataURL().split(',')[1]);
+  await writeFile(`${outputDirectory}/painted-naval-art.png`, Buffer.from(png, 'base64'));
+  console.log(`PAINTED GRAPHICS: ${JSON.stringify(result)}`);
+  await page.close();
+
+  const missing = await browser.newPage();
+  await missing.route('**/assets/art/ship-deck.png', route => route.abort());
+  await missing.goto(baseUrl);
+  await missing.getByRole('button', { name: 'Click to Engage', exact: true }).click();
+  await missing.getByText('Artwork unavailable. Reload to retry.', { exact: true }).waitFor();
+  if (!(await missing.evaluate(() => NavalArt.stats.failed && gameState === 'SPLASH'))) {
+    throw new Error('Missing art must prevent starting an incomplete game.');
+  }
+  await missing.close();
+  for (const path of ['/package.json', '/RULES.md', '/assets/art/missing.png']) {
+    if ((await browser.newPage().then(async page => { const response = await page.request.get(`${baseUrl}${path}`); await page.close(); return response.status(); })) !== 404) {
+      throw new Error(`Verifier server must reject unlisted path ${path}.`);
+    }
+  }
+}
+
 async function verifyIslandDetail(browser) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
   page.on("pageerror", (error) => { throw error; });
@@ -385,10 +483,9 @@ async function verifyIslandDetail(browser) {
   const result = await page.evaluate(() => window.__verifyIslandDetail?.());
   if (
     !result ||
-    result.layerCount < 5 ||
-    result.hillCount < 1 ||
-    result.rockCount < 1 ||
-    result.treeCount < 1 ||
+    !result.paintedTerrain ||
+    result.opaqueCoastSamples !== 128 ||
+    result.clearOffshoreSamples !== 128 ||
     result.shorelineRadius <= 0 ||
     result.sampledMaximumShorelineRadius > result.maximumShorelineRadius ||
     !result.boundsFit ||
@@ -396,9 +493,6 @@ async function verifyIslandDetail(browser) {
     !result.positivePadding ||
     !result.worldCenterPreserved ||
     !result.shorelineMatchesCollision ||
-    !result.terrainLayerNesting ||
-    result.terrainContourDiversity < 0.015 ||
-    result.shoreMarkCount < 40 ||
     Object.values(result.theoreticalPadding ?? {}).length !== 4 ||
     Object.values(result.theoreticalPadding ?? {}).some((padding) => padding < result.requestedPadding) ||
     result.minRenderX < 0 ||
@@ -589,6 +683,7 @@ try {
     await verifyDefeat(browser);
     await verifyIslandCollision(browser);
     await verifyIslandDetail(browser);
+    await verifyPaintedArt(browser);
     await verifyEnemyOrbit(browser);
     await verifySecondaryArcs(browser);
     await verifyAnimationLoop(browser);
