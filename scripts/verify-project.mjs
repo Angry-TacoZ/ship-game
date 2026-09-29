@@ -14,6 +14,7 @@ const server = createServer(async (_request, response) => {
       '/': ['index.html', 'text/html; charset=utf-8'],
       '/index.html': ['index.html', 'text/html; charset=utf-8'],
       '/naval-art.js': ['naval-art.js', 'text/javascript; charset=utf-8'],
+      '/render-profile.js': ['render-profile.js', 'text/javascript; charset=utf-8'],
       '/assets/art/ocean.png': ['assets/art/ocean.png', 'image/png'],
       '/assets/art/island.png': ['assets/art/island.png', 'image/png'],
       '/assets/art/island-lowland.png': ['assets/art/island-lowland.png', 'image/png'],
@@ -518,6 +519,68 @@ async function verifyPaintedArt(browser) {
   }
 }
 
+async function verifyRenderCaches(browser) {
+  const page=await browser.newPage({viewport:{width:1440,height:900}});
+  const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  await page.goto(`${baseUrl}/?profile-render`);await page.waitForFunction(()=>!!window.RenderProfile);
+  await page.getByRole('button',{name:'Click to Engage',exact:true}).click();
+  await page.getByRole('button',{name:'Skirmish',exact:true}).click();
+  await page.getByRole('button',{name:/US NAVY/}).click();
+  const result=await page.evaluate(()=>{
+    gameState='PAUSED';
+    const create=()=>{const c=document.createElement('canvas');c.width=320;c.height=180;return c.getContext('2d');};
+    const cached=create(),reference=create(),water=[];
+    for(const z of [.1,.45,2]){
+      const x=-1531,y=2287,w=320/z,h=180/z,time=12345;
+      for(const c of [cached,reference])c.setTransform(z,0,0,z,-x*z,-y*z);
+      const before=cached.getTransform();NavalArt.ocean(cached,x,y,w,h,time);
+      const after=cached.getTransform();
+      const size=z<.2?128:z<.4?256:z<.8?512:1024;
+      const source=document.createElement('canvas');source.width=size;source.height=size;
+      const sourceContext=source.getContext('2d');sourceContext.imageSmoothingQuality='high';sourceContext.drawImage(RenderProfile.referenceWater,0,0,size,size);
+      reference.save();reference.fillStyle='#123f4c';reference.fillRect(x,y,w,h);
+      const pattern=reference.createPattern(source,'repeat');pattern.setTransform(new DOMMatrix().scale(1024/size));
+      reference.fillStyle=pattern;reference.fillRect(x,y,w,h);
+      reference.globalAlpha=.07;reference.translate(Math.sin(time/7000)*12,Math.cos(time/9000)*12);reference.fillRect(x-16,y-16,w+32,h+32);
+      reference.globalAlpha=.2;reference.fillStyle='#123b46';reference.fillRect(x-16,y-16,w+32,h+32);reference.restore();
+      const a=cached.getImageData(0,0,320,180).data,b=reference.getImageData(0,0,320,180).data;
+      let delta=0,maximum=0;for(let i=0;i<a.length;i++){delta+=Math.abs(a[i]-b[i]);maximum=Math.max(maximum,Math.abs(a[i]-b[i]));}
+      water.push({zoom:z,meanChannelDelta:delta/a.length,maxChannelDelta:maximum,transformPreserved:before.toString()===after.toString()});
+    }
+    const creates=NavalArt.stats.waterPatternCreates;
+    for(let i=0;i<100;i++)NavalArt.ocean(cached,-1531,2287,320/.45,180/.45,i*1000);
+    const patternReused=NavalArt.stats.waterPatternCreates===creates;
+    const entity={x:0,y:0,angle:.77,radius:50,vx:3,vy:2};
+    for(let i=0;i<100;i++){entity.x+=Math.cos(entity.angle)*6;entity.y+=Math.sin(entity.angle)*6;NavalArt.recordWake(entity,16.6);}
+    const context=create();context.setTransform(.1,0,0,.1,160,90);
+    const before=NavalArt.stats.wakeDraws||0;
+    NavalArt.wake(context,entity,{left:-1600,right:1600,top:-900,bottom:900,zoom:.1});
+    const wideDraws=(NavalArt.stats.wakeDraws||0)-before;
+    const historyPreserved=NavalArt.wakeCount(entity)===100;
+    const visible=context.getImageData(0,0,320,180).data.some((v,i)=>i%4===3&&v>0);
+    const normalStart=NavalArt.stats.wakeDraws||0;
+    NavalArt.wake(context,entity,{left:-1600,right:1600,top:-900,bottom:900,zoom:.45});
+    const normalDraws=(NavalArt.stats.wakeDraws||0)-normalStart;
+    const outsideStart=NavalArt.stats.wakeDraws||0;
+    NavalArt.wake(context,entity,{left:1e6,right:1e6+100,top:1e6,bottom:1e6+100,zoom:.1});
+    const offscreenDraws=(NavalArt.stats.wakeDraws||0)-outsideStart;
+    entity.vx=0;entity.vy=0;NavalArt.recordWake(entity,5000);
+    const expires=NavalArt.wakeCount(entity)===0;
+    const cache=NavalArt.renderCacheInfo();
+    const fixtures=[1,5].flatMap(w=>[.45,.1].map(z=>RenderProfile.fixture(w,true,z)));
+    RenderProfile.mode('full');renderGameFrame(12345);
+    return {water,patternReused,wideDraws,normalDraws,offscreenDraws,historyPreserved,visible,expires,cache,
+      fixtureCounts:fixtures.map(f=>f.enemyCount),phases:Object.keys(RenderProfile.samples().at(-1))};
+  });
+  if(result.water.some(w=>w.meanChannelDelta>2||!w.transformPreserved)||!result.patternReused||
+      result.wideDraws<1||result.wideDraws>180||result.normalDraws!==297||result.offscreenDraws!==0||!result.historyPreserved||!result.visible||!result.expires||
+      result.cache.wakeSprites!==1||result.cache.wakeBytes!==96*96*4||JSON.stringify(result.fixtureCounts)!==JSON.stringify([5,5,20,20])||errors.length)throw new Error(`Render cache verification failed: ${JSON.stringify({result,errors})}`);
+  await page.close();
+  const normal=await browser.newPage();await normal.goto(baseUrl);
+  if(await normal.evaluate(()=>!!window.RenderProfile||!!window.__profileWaterSource))throw new Error('Normal gameplay must not load render diagnostic.');
+  await normal.close();console.log(`RENDER CACHES: ${JSON.stringify(result)}`);
+}
+
 async function verifyShellTracers(browser) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const errors = [];
@@ -798,6 +861,7 @@ try {
     await verifyIslandDetail(browser);
     await verifyPaintedArt(browser);
     await verifyShellTracers(browser);
+    await verifyRenderCaches(browser);
     await verifyEnemyOrbit(browser);
     await verifySecondaryArcs(browser);
     await verifyAnimationLoop(browser);

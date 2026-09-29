@@ -8,6 +8,8 @@ window.NavalArt = (() => {
     const islandNames = ['island', 'island-lowland', 'island-spine'];
     const islandSources = [];
     const shellSprites = new Map();
+    const waterPatterns = new WeakMap();
+    const waterLevels = new Map();
     const segments = 128;
     const stats = { ready: false, failed: false, hullCaches: 0, islandPaints: 0, wakePoints: 0 };
 
@@ -48,6 +50,17 @@ window.NavalArt = (() => {
             blend((i * 1024 + j) * 4, ((1023 - i) * 1024 + j) * 4, (1 - i / 96) * 0.5);
         }
         water.putImageData(tile, 0, 0);
+        // Tint both passes once. (0.93*T + 0.07*T-offset) is the same blend
+        // as the old two texture passes followed by a 20% full-screen tint.
+        if (['localhost','127.0.0.1','[::1]'].includes(location.hostname) && new URLSearchParams(location.search).has('profile-render')) window.__profileWaterSource=waterTile;
+        const tinted = canvas(1024,1024), tint = tinted.getContext('2d');
+        tint.drawImage(waterTile,0,0);tint.fillStyle='rgba(18,59,70,.2)';tint.fillRect(0,0,1024,1024);
+        waterTile = tinted;
+        waterLevels.set(1024,waterTile);
+        for(const size of [128,256,512]){
+            const mip=canvas(size,size),mc=mip.getContext('2d');mc.imageSmoothingQuality='high';
+            mc.drawImage(waterTile,0,0,size,size);waterLevels.set(size,mip);
+        }
         foam = canvas(96, 96);
         const fc = foam.getContext('2d');
         for (let i = 0; i < 60; i++) {
@@ -106,17 +119,31 @@ window.NavalArt = (() => {
     });
 
     function ocean(context, x, y, width, height, time = 0) {
+        const profile = window.RenderProfile;
         context.save();
-        context.fillStyle = '#123f4c'; context.fillRect(x, y, width, height);
         if (stats.ready) {
-            context.fillStyle = context.createPattern(waterTile, 'repeat');
-            context.fillRect(x, y, width, height);
+            const world=context.getTransform();
+            const left=world.a*x+world.c*y+world.e,top=world.b*x+world.d*y+world.f;
+            const screenWidth=width*world.a,screenHeight=height*world.d;
+            context.setTransform(1,0,0,1,0,0);
+            // The source still covers 1024 world units; only sample resolution
+            // changes. Coarse levels avoid repeatedly filtering 1024px tiles.
+            const resolution=world.a<.2?128:world.a<.4?256:world.a<.8?512:1024;
+            let patterns=waterPatterns.get(context);if(!patterns){patterns=new Map();waterPatterns.set(context,patterns);}
+            let pattern=patterns.get(resolution);
+            if(!pattern){pattern=context.createPattern(waterLevels.get(resolution),'repeat');patterns.set(resolution,pattern);stats.waterPatternCreates=(stats.waterPatternCreates||0)+1;}
+            profile?.begin('water.pattern');
+            const factor=1024/resolution;
+            world.a*=factor;world.d*=factor;
+            pattern.setTransform(world);context.fillStyle=pattern;
+            context.fillRect(left,top,screenWidth,screenHeight);
+            profile?.end('water.pattern'); profile?.begin('water.animated');
             context.globalAlpha = 0.07;
-            context.translate(Math.sin(time / 7000) * 12, Math.cos(time / 9000) * 12);
-            context.fillRect(x - 16, y - 16, width + 32, height + 32);
-            context.globalAlpha = 0.2; context.fillStyle = '#123b46';
-            context.fillRect(x - 16, y - 16, width + 32, height + 32);
-        }
+            world.e+=Math.sin(time/7000)*12*world.a/factor;world.f+=Math.cos(time/9000)*12*world.d/factor;
+            pattern.setTransform(world);context.fillStyle=pattern;
+            context.fillRect(left,top,screenWidth,screenHeight);
+            profile?.end('water.animated');
+        } else {context.fillStyle='#123f4c';context.fillRect(x,y,width,height);}
         context.restore();
     }
 
@@ -197,6 +224,7 @@ window.NavalArt = (() => {
     }
 
     function hull(context, nation, length, width, color, trace) {
+        if (window.RenderProfile && !window.RenderProfile.enabled('hulls')) return;
         const key = `${nation}:${length}:${width}:${color}`;
         if (!hulls.has(key)) {
             const sprite = canvas(Math.ceil(length * 2.4 * 3 + 24), Math.ceil(width * 2 * 3 + 24));
@@ -248,23 +276,33 @@ window.NavalArt = (() => {
         stats.wakePoints = points.length;
     }
 
-    function wake(context, entity) {
+    function wake(context, entity, view) {
         const points = wakes.get(entity) || [];
         context.save(); context.lineCap = 'round';
+        let lastX=Infinity,lastY=Infinity,lastIndex=0;
+        const visible=(x,y,padding)=>!view || !(x+padding<view.left || x-padding>view.right || y+padding<view.top || y-padding>view.bottom);
         for (let i = 1; i < points.length; i++) {
             const q = points[i];
-            const age = 1 - q.life / 4500, spread = entity.radius * (0.32 + age * 1.3);
-            for (const side of [-1, 0, 1]) {
-                const jitter = Math.sin(q.x * .13 + q.y * .19 + side) * entity.radius * .09;
-                const x = q.x - Math.sin(q.angle) * (spread * side + jitter);
-                const y = q.y + Math.cos(q.angle) * (spread * side + jitter);
-                const size = entity.radius * (0.65 + age * 0.6);
-                context.globalAlpha = (1 - age) * Math.min(1, i / 12) * (side === 0 ? .37 : .27);
-                context.drawImage(foam, x - size / 2, y - size / 2, size, size);
+            if(!visible(q.x,q.y,entity.radius*2.6)){lastX=Infinity;lastY=Infinity;lastIndex=i;continue;}
+            // Only skip subpixel-redundant centers. Normal-zoom foam remains
+            // identical; keep spacing below half a tiny ship's foam footprint.
+            const spacing=view?Math.min(1,entity.radius*view.zoom*.325):0;
+            if(view && i<points.length-1 && Math.hypot(q.x-lastX,q.y-lastY)*view.zoom<spacing)continue;
+            const age=Math.max(0,Math.min(1,1-q.life/4500));
+            const weight=Number.isFinite(lastX)?Math.max(1,i-lastIndex):1;
+            const spread=entity.radius*(.32+age*1.3),size=entity.radius*(.65+age*.6);
+            for(const side of [-1,0,1]){
+                const jitter=Math.sin(q.x*.13+q.y*.19+side)*entity.radius*.09;
+                const x=q.x-Math.sin(q.angle)*(spread*side+jitter),y=q.y+Math.cos(q.angle)*(spread*side+jitter);
+                const alpha=(1-age)*Math.min(1,i/12)*(side===0?.37:.27);
+                context.globalAlpha=weight===1?alpha:1-Math.pow(1-alpha,weight);
+                context.drawImage(foam,x-size/2,y-size/2,size,size);
+                stats.wakeDraws=(stats.wakeDraws||0)+1;
             }
+            lastX=q.x;lastY=q.y;lastIndex=i;
         }
         const speed = Math.hypot(entity.vx || 0, entity.vy || 0);
-        if (speed > 0.3) {
+        if (speed > 0.3 && visible(entity.x,entity.y,entity.radius*2.4)) {
             context.translate(entity.x, entity.y); context.rotate(entity.angle);
             context.globalAlpha = Math.min(0.6, speed * 0.17); context.strokeStyle = '#ecf5e9'; context.lineWidth = 2;
             const l = entity.radius * 2.1, w = entity.radius * 0.65;
@@ -277,5 +315,7 @@ window.NavalArt = (() => {
     }
 
     return { ready, stats, variantCount: islandNames.length, ocean, island, shorelineRadius, shell, shellTrailGeometry,
+        renderCacheInfo: () => ({wakeSprites:1,wakeBytes:foam.width*foam.height*4,
+            waterBytes:[...waterLevels.values()].reduce((n,c)=>n+c.width*c.height*4,0),hullBytes:[...hulls.values()].reduce((n,h)=>n+h.sprite.width*h.sprite.height*4,0)}),
         shellCacheCount: () => shellSprites.size, hull, turret, recordWake, wake, wakeCount: entity => (wakes.get(entity) || []).length };
 })();

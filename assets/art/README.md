@@ -16,4 +16,16 @@ Placement rejects overlapping conservative visual envelopes (1.30 times gameplay
 
 Island caches are at most 1536 pixels on either axis (at most 135 MiB of raw RGBA pixels for 15 islands, excluding decoded source images, GPU copies, and the main canvas). This limits sampling resolution, not world dimensions or collision clearance. The water tile and hull detail are cached; wakes are bounded to 100 points per ship and expire after stopping.
 
+The Canvas performance pass caches water patterns per destination context and
+sample resolution. Tint is baked into the unchanged painted texture; two
+screen-space fills retain world anchoring and the subtle offset animation.
+128/256/512/1024px sampling levels cover the same 1024 world units and reduce
+minification work. Low zoom is slightly softer through antialiasing, not a new
+palette or replacement painting. Raw water sampling caches occupy 5.3125 MiB.
+Wakes retain their original foam texture, three lateral samples, jitter, history
+and expiry. Off-screen points are culled conservatively; only subpixel-redundant
+centers are skipped, with opacity compensation. Normal-zoom wake spacing is
+unchanged. The single 96px foam cache remains 36 KiB. These changes do not by
+themselves establish sustained 60 FPS; see the performance investigation.
+
 Shells use three small code-painted sprite pairs (main, secondary, enemy), not generated images: shaded pointed bodies, bright cores, and tapered gold/ember trails. Trails follow velocity and are limited to distance traveled from the launch point, at most 170 world pixels for main shells or 105 for other shells. Rendering uses at most two cached image draws per shell, with no live blur, particle spawning, or history buffers. Collision/damage/speed/lifetime rules remain in the original projectile update path; hit or expired shells draw nothing.

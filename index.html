@@ -1293,8 +1293,22 @@ function gameLoop(timestamp) {
                 accumulator -= TIME_STEP;
             }
         }
+        renderGameFrame(timestamp);
+    }
+    requestAnimationFrame(gameLoop);
+}
+
+function renderGameFrame(timestamp) {
+        const profile = window.RenderProfile;
+        profile?.beginFrame();
+        const view={left:player.x-width/(2*zoom),right:player.x+width/(2*zoom),top:player.y-height/(2*zoom),bottom:player.y+height/(2*zoom),zoom};
         ctx.save(); ctx.translate(width/2, height/2); ctx.scale(zoom, zoom); ctx.translate(-player.x, -player.y);
+        profile?.begin('ocean');
+        if (!profile || profile.enabled('water')) {
         NavalArt.ocean(ctx, player.x - width / (2 * zoom), player.y - height / (2 * zoom), width / zoom, height / zoom, timestamp);
+        } else { ctx.fillStyle = '#123f4c'; ctx.fillRect(player.x-width/(2*zoom),player.y-height/(2*zoom),width/zoom,height/zoom); }
+        profile?.end('ocean'); profile?.begin('islands');
+        if (!profile || profile.enabled('islands')) {
         islands.forEach(isl => {
             const drawPosition = islandBufferWorldPosition(isl);
             const geometry = isl.renderGeometry;
@@ -1302,14 +1316,23 @@ function gameLoop(timestamp) {
                 drawPosition.x + geometry.bufferWidth < player.x - width / (2 * zoom) || drawPosition.y + geometry.bufferHeight < player.y - height / (2 * zoom)) return;
             ctx.drawImage(isl.buffer, drawPosition.x, drawPosition.y, geometry.bufferWidth, geometry.bufferHeight);
         });
-        enemies.forEach(e => NavalArt.wake(ctx, e)); NavalArt.wake(ctx, player);
+        }
+        profile?.end('islands'); profile?.begin('wakes');
+        if (!profile || profile.enabled('wakes')) {
+        enemies.forEach(e => NavalArt.wake(ctx, e, view)); NavalArt.wake(ctx, player, view);
+        }
+        profile?.end('wakes'); profile?.begin('particles');
         particles.forEach(p => p.draw());
-        enemies.forEach(e => e.draw()); if (player) player.draw(); drops.forEach(d => d.draw()); projectiles.forEach(p => p.draw());
+        profile?.end('particles'); profile?.begin('ships');
+        enemies.forEach(e => e.draw()); if (player) player.draw(); drops.forEach(d => d.draw());
+        profile?.end('ships'); profile?.begin('projectiles');
+        if (!profile || profile.enabled('tracers')) projectiles.forEach(p => p.draw());
+        profile?.end('projectiles'); profile?.begin('popups');
         damagePopups.forEach(p => { ctx.save(); ctx.globalAlpha = p.life / 1000; ctx.font = 'bold 32px monospace'; ctx.textAlign = 'center'; ctx.fillStyle = p.color; ctx.fillText(p.text, p.x, p.y); ctx.restore(); });
         ctx.restore();
+        profile?.end('popups'); profile?.begin('minimapUI');
         drawMinimap(); updateDOM();
-    }
-    requestAnimationFrame(gameLoop);
+        profile?.end('minimapUI'); profile?.endFrame();
 }
 
 function updateDOM() {
@@ -1788,6 +1811,10 @@ const handleInput = (clientX, clientY, isRightClick = false) => {
 canvas.addEventListener('mousedown', e => { handleInput(e.clientX, e.clientY, e.button === 2); });
 canvas.addEventListener('touchstart', e => { handleInput(e.touches[0].clientX, e.touches[0].clientY, false); }, { passive: true });
 window.addEventListener('wheel', e => { zoom = Math.max(0.1, Math.min(2.0, zoom - e.deltaY * 0.001)); }, { passive: false });
+// Local-only, opt-in diagnostic. No script, UI or timing buffers in normal play.
+if (['localhost', '127.0.0.1', '[::1]'].includes(location.hostname) && new URLSearchParams(location.search).has('profile-render')) {
+    const diagnostic = document.createElement('script'); diagnostic.src = 'render-profile.js'; document.head.appendChild(diagnostic);
+}
 </script>
 
 </body></html>
