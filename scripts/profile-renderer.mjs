@@ -24,11 +24,17 @@ if(process.env.PROFILE_BASELINE){
   await page.route('**/naval-art.js',route=>route.fulfill({contentType:'text/javascript',body:source}));
 }
 const errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')errors.push(m.text());});
-await page.goto(`${process.env.PROFILE_BASE_URL || 'http://127.0.0.1:4186'}/?profile-render`);
+const renderer = process.env.PROFILE_RENDERER || 'Canvas2D';
+if (!['Canvas2D','PixiJS/WebGL'].includes(renderer)) throw new Error('PROFILE_RENDERER must be Canvas2D or PixiJS/WebGL');
+await page.goto(`${process.env.PROFILE_BASE_URL || 'http://127.0.0.1:4186'}/?profile-render&renderer-lab`);
 await page.waitForFunction(()=>!!window.RenderProfile);
 await page.getByRole('button',{name:'Click to Engage',exact:true}).click();
 await page.getByRole('button',{name:'Skirmish',exact:true}).click();
 await page.getByRole('button',{name:/US NAVY/}).click();
+await page.evaluate(async renderer => {
+  await window.RendererExperiment.ready;
+  if (renderer !== 'Canvas2D') await window.RendererExperiment.switchTo(renderer);
+}, renderer);
 const scenarios=[];
 for(const wave of [1,5])for(const zoom of [.45,.1])for(const moving of [false,true]){
   if(process.env.PROFILE_CASE && process.env.PROFILE_CASE!==`${wave},${zoom},${moving}`)continue;
@@ -50,20 +56,21 @@ for(const wave of [1,5])for(const zoom of [.45,.1])for(const moving of [false,tr
       return {mode,frames:intervals.length,frame:distribution(intervals),phases,wakeDrawCalls:distribution(samples.map(s=>s.wakeDrawCalls||0))};
     },mode);
     runs.push(result);
-    if(mode==='full')await page.screenshot({path:`${output}/wave${wave}-zoom${zoom}-${moving?'moving':'stationary'}.png`});
-    console.log(JSON.stringify({wave,zoom,moving,mode,frame:result.frame,render:result.phases.total}));
+    if(mode==='full')await page.screenshot({path:`${output}/${renderer.replaceAll('/','-')}-wave${wave}-zoom${zoom}-${moving?'moving':'stationary'}.png`});
+    console.log(JSON.stringify({renderer,wave,zoom,moving,mode,frame:result.frame,render:result.phases.total}));
   }
   scenarios.push({fixture,runs});
-  await writeFile(`${output}/results.json`,JSON.stringify({label,viewport:[1440,900],scenarios,errors},null,2));
+  await writeFile(`${output}/results.json`,JSON.stringify({label,renderer,viewport:[1440,900],scenarios,errors},null,2));
 }
 // Readback can force Canvas acceleration changes: perform it only AFTER all
 // ordinary measurements, so it cannot contaminate later A/B frame samples.
-const completion=await page.evaluate(()=>{
+const completion=renderer==='Canvas2D' ? await page.evaluate(()=>{
   RenderProfile.fixture(5,true,.45);RenderProfile.mode('full');
   const values=[];
   for(let i=0;i<12;i++){const t=performance.now();renderGameFrame(12345);ctx.getImageData(0,0,1,1);values.push(performance.now()-t);}
   values.sort((a,b)=>a-b);return {median:values[6],p95:values[11],note:'Render plus forced readback; not normal FPS or GPU stage timing'};
-});
-await writeFile(`${output}/results.json`,JSON.stringify({label,viewport:[1440,900],scenarios,completion,errors},null,2));
+}) : { note: 'Skipped forced Canvas2D readback for WebGL; use ordinary frame distributions for comparison.' };
+const diagnostics = await page.evaluate(() => window.RendererExperiment.diagnostics());
+await writeFile(`${output}/results.json`,JSON.stringify({label,renderer,viewport:[1440,900],scenarios,completion,diagnostics,errors},null,2));
 await browser.close();
 if(errors.length)throw new Error(errors.join('; '));

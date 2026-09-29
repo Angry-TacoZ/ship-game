@@ -4,4 +4,5 @@ playwright-report/
 test-results/
 .codex-artifacts/
 output/
+assets/generated/pixi-renderer.js
 .gitagent/

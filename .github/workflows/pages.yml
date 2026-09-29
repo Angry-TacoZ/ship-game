@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    branches: [main, codex/natural-islands]
   workflow_dispatch:
 
 permissions:
