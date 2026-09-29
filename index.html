@@ -1375,6 +1375,7 @@ const canvasTouchInput = e => handleInput(e.touches[0].clientX, e.touches[0].cli
 async function switchRenderer(name) {
     if (!rendererLabEnabled && name !== 'Canvas2D') throw new Error('Renderer experiment is local-only.');
     if (name === 'Canvas2D') {
+        recoverPixiAfterContextLoss = false;
         activeRenderer = name; canvas.style.visibility = 'visible';
         pixiRenderer?.setVisible(false); setRendererInputTarget(canvas); return;
     }
