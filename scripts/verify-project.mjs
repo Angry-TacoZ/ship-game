@@ -787,13 +787,18 @@ async function verifyRendererExperiment(browser) {
       canvas2dRestored.pixiDisplay !== 'none') {
     throw new Error(`Canvas2D was not restored after switching renderer: ${JSON.stringify(canvas2dRestored)}`);
   }
-  // A display:none WebGL canvas in headless Chromium does not reliably emit
-  // forced native context events, so exercise the same DOM lifecycle handlers
-  // directly here. The active-Pixi case above covers real forced loss/restore.
+  // Force the real context while its canvas is hidden. Headless Chromium can
+  // omit its native DOM notifications in this state, so synthesize only events
+  // it did not deliver. The active-Pixi case above also covers native recovery.
+  await page.evaluate(() => window.RendererExperiment.forceContextLoss());
+  await page.waitForFunction(() => document.querySelector('.pixi-renderer-canvas')
+    ?.getContext('webgl2')?.isContextLost(), { timeout: 5000 });
   const inactiveLost = await page.evaluate(() => {
     const pixiCanvas = document.querySelector('.pixi-renderer-canvas');
-    pixiCanvas.dispatchEvent(new Event('webglcontextlost', { cancelable: true }));
+    const nativeEventHandled = window.RendererExperiment.diagnostics().contextLost;
+    if (!nativeEventHandled) pixiCanvas.dispatchEvent(new Event('webglcontextlost', { cancelable: true }));
     return { ...window.RendererExperiment.diagnostics(),
+      nativeEventHandled,
       canvas2dVisibility: getComputedStyle(document.querySelector('#gameCanvas')).visibility,
       pixiDisplay: getComputedStyle(pixiCanvas).display };
   });
@@ -801,10 +806,16 @@ async function verifyRendererExperiment(browser) {
       inactiveLost.canvas2dVisibility !== 'visible' || inactiveLost.pixiDisplay !== 'none') {
     throw new Error(`Inactive Pixi context loss disturbed Canvas2D: ${JSON.stringify(inactiveLost)}`);
   }
+  await page.evaluate(() => window.RendererExperiment.forceContextRestore());
+  await page.waitForFunction(() => !document.querySelector('.pixi-renderer-canvas')
+    ?.getContext('webgl2')?.isContextLost(), { timeout: 10000 });
+  await page.waitForTimeout(100);
   const inactiveRestored = await page.evaluate(() => {
     const pixiCanvas = document.querySelector('.pixi-renderer-canvas');
-    pixiCanvas.dispatchEvent(new Event('webglcontextrestored'));
+    const nativeEventHandled = !window.RendererExperiment.diagnostics().contextLost;
+    if (!nativeEventHandled) pixiCanvas.dispatchEvent(new Event('webglcontextrestored'));
     return { ...window.RendererExperiment.diagnostics(),
+      nativeEventHandled,
       canvas2dVisibility: getComputedStyle(document.querySelector('#gameCanvas')).visibility,
       pixiDisplay: getComputedStyle(pixiCanvas).display };
   });
