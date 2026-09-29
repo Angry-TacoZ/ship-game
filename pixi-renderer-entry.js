@@ -37,7 +37,7 @@ class PixiGameRenderer {
         this.visible = { islands: 0, ships: 0, projectiles: 0 };
         this.onLost = () => { this.contextLost = true; this.appCanvas.style.display = 'none';
             this.appCanvas.dispatchEvent(new CustomEvent('renderer-context-lost')); };
-        this.onRestored = () => { this.contextLost = false;
+        this.onRestored = () => { this.contextLost = false; this.appCanvas.style.display = 'block';
             this.appCanvas.dispatchEvent(new CustomEvent('renderer-context-restored')); };
     }
 
